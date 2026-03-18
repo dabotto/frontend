@@ -1,0 +1,491 @@
+var IndexController = function(view) {
+    var context = window.indexContext = this;
+    context.view = view;
+
+    context.refreshBalance = async function refreshBalance() {
+        var session = window.walletSession;
+        var state = context.view.state;
+        var tokenAddress = state[state.mode + 'TokenAddress'];
+        if(!session || !session.active || !state.walletAddress || !tokenAddress) return;
+        var mode = state.mode;
+        try {
+            var balance, allowance;
+            if(tokenAddress === voidEthereumAddress) {
+                allowance = balance = await web3.eth.getBalance(state.walletAddress);
+            } else {
+                balance = abi.decode(['uint256'], await call(tokenAddress, 'balanceOf(address)', state.walletAddress))[0].toString();
+                allowance = abi.decode(['uint256'], await call(tokenAddress, 'allowance(address,address)', state.walletAddress, window.context.managerAddress))[0].toString();
+            }
+            if(session.active && context.view.state.mode === mode && context.view.state[mode + 'TokenAddress'] === tokenAddress) context.view.setState({ balance, allowance });
+        } catch(e) { if(session.active) console.log(e); }
+    };
+
+    context.getManager = function() {
+        requireWalletSession();
+        return context.manager = context.manager || new web3.eth.Contract(window.context.ManagerABI, window.context.managerAddress);
+    };
+
+    context.refreshReferral = async function() {
+        var session = requireWalletSession();
+        try {
+            var enabled = await context.getManager().methods.referrals(session.address).call();
+            if(session.active) context.view.setState({ connectedIsReferral: enabled });
+        } catch(e) {
+            if(session.active) context.view.setState({ connectedIsReferral: false });
+            console.log(e);
+        }
+    };
+
+    context.approveForAddLiquidity = function approveForAddLiquidity(address, value) {
+        requireWalletSession();
+        return prepareAndSendTx((new web3.eth.Contract(window.context.IERC20ABI, address)).methods.approve(window.context.managerAddress, value), {
+            returnReceipt : true,
+            throwError : true
+        }).then(context.refreshBalance);
+    }
+
+    context.addLiquidity = async function addLiquidity(address, value, subject) {
+        var session = requireWalletSession();
+        subject = (subject || '').trim() || voidEthereumAddress;
+        if(!web3utils.isAddress(subject)) throw new Error("Invalid beneficiary address.");
+        var manager = context.getManager();
+        if(subject.toLowerCase() !== voidEthereumAddress && subject.toLowerCase() !== session.address.toLowerCase() && !context.view.state.isOwner) {
+            if(!await manager.methods.referrals(session.address).call()) throw new Error("Protocol authorization is required to deposit for another address.");
+        }
+        if(!session.active) throw new Error("Wallet network or account changed.");
+        return prepareAndSendTx(manager.methods.addLiquidity(address, value, context.view.state.referenceTokenAddress, subject), {
+            returnReceipt : true,
+            throwError : true,
+            value : address === voidEthereumAddress ? value : "0"
+        }).then(context.refreshBalance);
+    }
+
+    context.manageReferrals = function(toAdd, toRemove) {
+        var session = requireWalletSession();
+        function parseAddresses(value) {
+            var addresses = value.trim().split(/[\s,;]+/).filter(Boolean);
+            if(addresses.some(address => !web3utils.isAddress(address))) throw new Error("Enter valid referral addresses separated by commas or new lines.");
+            return [...new Set(addresses.map(address => web3utils.toChecksumAddress(address)))];
+        }
+        var additions = parseAddresses(toAdd), removals = parseAddresses(toRemove);
+        if(!additions.length && !removals.length) throw new Error("Enter at least one referral address.");
+        return prepareAndSendTx(context.getManager().methods.manageReferrals(additions, removals), { returnReceipt: true, throwError: true }).then(async receipt => {
+            if(session.active) await context.refreshReferral();
+            return receipt;
+        });
+    }
+
+    context.removeLiquidity = function removeLiquidity(address, value, readonly) {
+        var method = context.getManager().methods.removeLiquidity(value, address);
+        return readonly ? method.call({from : context.view.state.walletAddress}) : prepareAndSendTx(method);
+    }
+
+    context.rebalance = async function rebalance() {
+        var session = requireWalletSession();
+        if(!context.toRebalance || context.toRebalance.length === 0) {
+            return;
+        }
+        var all = [...context.toRebalance];
+        var indices = [...all.filter(it => it.rebalanceNeeded), ...all.filter(it => !it.rebalanceNeeded).sort((a, b) => parseInt(b.convertedSurplus) - parseInt(a.convertedSurplus))];
+        if(indices.length === 0) {
+            return;
+        }
+        indices = indices.map(it => it.index);
+        var idx = [...indices];
+        var originalException;
+        var times = 3;
+        while(true) {
+            try {
+                for(var i = 0; i < times; i++) {
+                    if(!session.active) throw new Error("Wallet network or account changed.");
+                    await context.getManager().methods.pools(idx).estimateGas({
+                        from : context.view.state.walletAddress,
+                        gas : 16700000
+                    });
+                    await sleep(1500);
+                }
+                return await prepareAndSendTx(context.getManager().methods.pools(idx));
+            } catch(e) {
+                originalException = originalException || e;
+                var message = (e.message || e).toString().toLowerCase().trim();
+                if(message != "returned error: execution reverted" && message.split(" ").join("").split("'").join('"').indexOf('"cause":null') === -1) {
+                    throw e;
+                }
+                idx.pop();
+                if(idx.length === 0) {
+                    throw originalException || e;
+                } 
+            }
+        }
+    }
+
+    context.claimReward = function claimReward() {
+        return prepareAndSendTx(context.getManager().methods.claimReward(context.view.state.referenceTokenAddress));
+    }
+
+    async function prepareAndSendTx(method, options = {}) {
+        var session = requireWalletSession();
+        context.timeout && clearTimeout(context.timeout);
+        var account = session.address;
+        var tx = {
+            from : account,
+            chainId : web3utils.numberToHex(session.chainId),
+            value : '0x0',
+            gas : 16700000
+        };
+        options.value !== undefined && options.value !== '0' && (tx.value = web3utils.numberToHex(options.value));
+        tx = {
+            ...tx,
+            to: method._parent.options.address,
+            data: method.encodeABI(),
+            gasPrice: web3utils.numberToHex(await web3.eth.getGasPrice())
+        };
+        try {
+            if(!session.active) throw new Error("Wallet network or account changed.");
+            var receipt = await web3.eth.sendTransaction(tx);
+            console.log(receipt);
+            context.init();
+            if(options.returnReceipt) {
+                await new Promise(ok => setTimeout(ok, 2000));
+                return receipt;
+            } else {
+                window.open(getEtherscanAddress('tx/' + receipt.transactionHash, session.chainId), '_blank', 'noopener,noreferrer');
+            }
+        } catch(e) {
+            console.log(e);
+            if(options.throwError) {
+                throw e;
+            } else {
+                alert("Error: " + (e.message || e).toString());
+            }
+        }
+    }
+
+    window.timeMachine = async function timeMachine(blockNumber) {
+        if(Array.isArray(blockNumber)) {
+            for(var b of blockNumber) {
+                await window.timeMachine(b);
+                context.timeout && clearTimeout(context.timeout);
+                await new Promise(ok => setTimeout(ok, 5000));
+            }
+            return await window.timeMachine();
+        }
+        !blockNumber && window.sessionStorage.removeItem(networkStorageKey("blockNumber"));
+        blockNumber && window.sessionStorage.setItem(networkStorageKey("blockNumber"), blockNumber);
+        await context.init();
+    }
+
+    context.init = async function init() {
+        context.timeout && clearTimeout(context.timeout);
+        var timeoutLimit = 10000;
+        var session = window.walletSession;
+        if(!session || !session.active) return;
+        var version = context.refreshVersion = (context.refreshVersion || 0) + 1;
+        var current = () => session.active && version === context.refreshVersion;
+        if(!window.web3?.currentProvider || !context?.view?.state?.walletAddress || !context?.view?.state?.referenceTokenAddress) {
+            return context.timeout = setTimeout(context.init, timeoutLimit);
+        }
+        try {
+            context.getManager();
+            var from = web3util.utils.toChecksumAddress(context.view.state.walletAddress);
+            context.toRebalance = [];
+            var manager = context.manager;
+            var referenceTokenAddress = context.view.state.referenceTokenAddress;
+            var referenceToken = getTokenMetaByAddress(referenceTokenAddress);
+            var referenceTokenDecimals = referenceToken.decimals;
+            var referenceTokenTicker = referenceToken.symbol;
+            var owner = web3util.utils.toChecksumAddress(await manager.methods.owner().call());
+            if(!current()) return;
+            var isOwner = owner === from;
+            context.view.setState({ connectedIsOwner: owner.toLowerCase() === session.address.toLowerCase() });
+            
+            context.view.emit('initRefresh', [undefined, false, isOwner]);
+            var blockNumber = parseInt(window.sessionStorage.getItem(networkStorageKey("blockNumber"))) || "latest";
+            var claimRewardResult = await manager.methods.claimReward(referenceTokenAddress).call({from}, blockNumber);
+
+            var perc = parseFloat(fromDecimals(claimRewardResult.participationPercentage, 18, true));
+
+            var synopticConverted = window.localStorage.synopticConverted === 'true';
+            var forecastIn12Months = window.localStorage.forecastIn12Months === 'true';
+            var net = isOwner && window.localStorage.net === 'true';
+
+            var globalStatus = await manager.methods.data(referenceTokenAddress).call(undefined, blockNumber);
+            var nextSeasonReward = globalStatus.nextSeasonReward;
+            nextSeasonReward = parseInt(nextSeasonReward) * perc;
+            nextSeasonReward = numberToString(nextSeasonReward).split('.')[0];
+
+            var stillInvested = (claimRewardResult.stillInvested.toString().indexOf("-") === -1 ? '0' : claimRewardResult.stillInvested).toString().split('-').join('');
+            var claimableReward = claimRewardResult.claimedReward;
+            var futureReward = claimRewardResult.participationPercentage.toString() === "0" ? 0 : parseInt(globalStatus.nextRebalanceEvent) - parseInt((await web3.eth.getBlock(blockNumber)).timestamp);
+            if(futureReward > 0) {
+                futureReward = numberToString(futureReward * (parseInt(globalStatus.rewardPerEvent) * perc)).split('.')[0];
+            } else {
+                futureReward = '0';
+            }
+            var heritage = claimRewardResult.participationPercentage.toString() === '0' ? '0' : (await manager.methods.removeLiquidity(numberToString(1e18), referenceTokenAddress).call({from}, blockNumber)).removedAmount;
+
+            var profitAndLoss = web3utils.toBN(claimRewardResult.stillInvested).add(web3utils.toBN(heritage)).add(web3utils.toBN(claimableReward)).add(web3utils.toBN(futureReward)).add(web3utils.toBN(nextSeasonReward)).toString();
+
+            var daily = parseFloat(fromDecimals(web3utils.toBN(claimRewardResult.previouslyClaimedReward).add(web3utils.toBN(nextSeasonReward)).add(web3utils.toBN(claimableReward)).add(web3utils.toBN(futureReward)).toString(), referenceTokenDecimals, true));
+            var segmentEnd = nextSeasonReward === '0' && futureReward === '0' ? parseInt((await web3.eth.getBlock(blockNumber)).timestamp) : futureReward === '0' ? parseInt(claimRewardResult._nextRebalanceEvent) : (parseInt(globalStatus.nextRebalanceEvent) + (parseInt(globalStatus.nextRebalanceEvent) - parseInt(globalStatus.seasonStart)));
+            var endEvent = segmentEnd - parseInt(claimRewardResult.rewardTimestamp);
+            endEvent /= 86400;
+            daily /= endEvent;
+            var eoy = await toEoy(claimRewardResult.rewardTimestamp);
+            var weekly = daily * 7 * (!forecastIn12Months && eoy.weeks < 1 ? eoy.weeks : 1);
+            var monthly = daily * 30 * (!forecastIn12Months && eoy.months < 1 ? eoy.months : 1);
+            var yearly = daily * (forecastIn12Months ? 365 : eoy.days);
+
+            if(claimRewardResult.stillInvested.toString().indexOf("-") !== -1) {
+                var value = web3utils.toBN(claimRewardResult.stillInvested).add(web3utils.toBN(heritage)).toString();
+                if(value.indexOf('-') !== -1) {
+                    value = parseFloat(fromDecimals(value, referenceTokenDecimals, true));
+                    var daysPassed = parseInt((await web3.eth.getBlock(blockNumber)).timestamp);
+                    daysPassed -= parseInt(claimRewardResult.rewardTimestamp);
+                    daysPassed /= 86400;
+                    /*if(lossIsProportional) {
+                        value = (value / daysPassed) * eoy.days;
+                    }*/
+                    yearly += value;
+                    daily = yearly / (forecastIn12Months ? 365 : eoy.days);
+                    weekly = daily * 7 * (!forecastIn12Months && eoy.weeks < 1 ? eoy.weeks : 1);
+                    monthly = daily * 30 * (!forecastIn12Months && eoy.months < 1 ? eoy.months : 1);
+                }
+            }
+
+            if(net || isOwner) {
+                if(isOwner) {
+                    yearly -= ((await convertFromEUR(20, referenceTokenAddress, referenceTokenDecimals)) * (forecastIn12Months ? 365 : eoy.days));
+                }
+                if(net && yearly > 0) {
+                    yearly *= (referenceTokenTicker === 'EURC' ? 0.725 : 0.655);
+                }
+                if(isOwner) {
+                    yearly -= ((await convertFromEUR(0.164, referenceTokenAddress, referenceTokenDecimals)) * (forecastIn12Months ? 365 : eoy.days));
+                }
+                daily = yearly / (forecastIn12Months ? 365 : eoy.days);
+                weekly = daily * 7 * (!forecastIn12Months && eoy.weeks < 1 ? eoy.weeks : 1);
+                monthly = daily * 30 * (!forecastIn12Months && eoy.months < 1 ? eoy.months : 1);
+            }
+
+            var nextRebalance = timeRemaining(new Date((parseInt(claimRewardResult._nextRebalanceEvent) !== 0 ? endEvent : claimRewardResult._nextRebalanceEvent) * 1000));
+            nextRebalance = `${[(nextRebalance.days && (nextRebalance.days + " day" + (nextRebalance.days === 1 ? "" : "s"))), (nextRebalance.hours && (nextRebalance.hours + " hour" + (nextRebalance.hours === 1 ? "" : "s"))), (nextRebalance.minutes && (nextRebalance.minutes + " minute" + (nextRebalance.minutes === 1 ? "" : "s")))].filter(it => it !== 0).join(', ')}`;
+            nextRebalance = nextRebalance.split(' (-)').join('');
+
+            var positions;
+
+            var initRefreshData = {
+                monitorStart : claimRewardResult.rewardTimestamp.toString() === '0' ? null : timeRemaining(new Date(parseInt(claimRewardResult.rewardTimestamp) * 1000), true),
+                monitorEnd : formatDate(new Date(segmentEnd * 1000)),
+                accruingResetDate: nextRebalance,
+                collectYear : formatMoney(yearly),
+                collectMonth : formatMoney(monthly),
+                collectWeek : formatMoney(weekly),
+                collectDay : formatMoney(daily),
+                collectNow : formatMoney(fromDecimals(nextSeasonReward, referenceTokenDecimals, true), 4),
+                participationPercent : formatMoney(perc * 100, 2),
+                heritageValue : formatMoney(fromDecimals(heritage, referenceTokenDecimals, true), 2),
+                pnl : formatMoney(fromDecimals(profitAndLoss, referenceTokenDecimals, true), 2),
+                hasHeritage : heritage !== '0',
+                hasParticipation : perc !== 0 || stillInvested !== '0',
+                stillInvested : formatMoney(fromDecimals(stillInvested, referenceTokenDecimals, true), 4),
+                alreadyCollected : formatMoney(fromDecimals(claimRewardResult.previouslyClaimedReward, referenceTokenDecimals, true), 2),
+                toBeCollected : formatMoney(fromDecimals(web3utils.toBN(futureReward).add(web3utils.toBN(nextSeasonReward)), referenceTokenDecimals, true), 2),
+                eoy
+            };
+
+            if(!current()) return;
+            context.view.emit('initRefresh', [positions, context.toRebalance.length !== 0, isOwner, claimableReward, initRefreshData]);
+
+            var syncedPools = await manager.methods.status(referenceTokenAddress, synopticConverted).call(undefined, blockNumber);
+            var s = web3utils.toBN(0);
+            var a = web3utils.toBN(0);
+            var p = web3utils.toBN(0);
+            for(var item of syncedPools) {
+                if(!current()) return;
+                (item.rebalanceNeeded || (synopticConverted && (item.surplus0.toString() !== '0' || item.surplus1.toString() !== '0'))) && context.toRebalance.push(item);
+                var token0 = item.token0Address;
+                var meta0 = await fetchTokenMeta(token0);
+                if(!current()) return;
+                saveTokenMeta(meta0);
+                var symbol0 = meta0.symbol;
+                var decimals0 = meta0.decimals;
+                var token1 = item.token1Address;
+                var meta1 = await fetchTokenMeta(token1);
+                if(!current()) return;
+                saveTokenMeta(meta1);
+                var symbol1 = meta1.symbol;
+                var decimals1 = meta1.decimals;
+                var position = {
+                    index : item.index,
+                    poolAddress : item.poolAddress,
+                    token0,
+                    symbol0,
+                    decimals0,
+                    token1,
+                    symbol1,
+                    decimals1,
+                    savedToken0Amount : item.savedAmount0,
+                    savedToken1Amount : item.savedAmount1,
+                    feeAmount0 : item.feeAmount0,
+                    feeAmount1 : item.feeAmount1,
+                    poolAmount0 : item.poolAmount0,
+                    poolAmount1 : item.poolAmount1,
+                    token0Amount : item.oldAmount0,
+                    token1Amount : item.oldAmount1,
+                    difference0 : item.difference0,
+                    difference1 : item.difference1,
+                    surplus0 : item.surplus0,
+                    surplus1 : item.surplus1,
+                    after0 : item.rebalancedAmount0,
+                    after1 : item.rebalancedAmount1,
+                    statusResult : item.rebalanceNeeded ? 2 : item.difference0.indexOf("-") !== -1 || item.difference1.indexOf("-") !== -1 ? 0 : item.surplus0 !== '0' || item.surplus1 !== '0' ? 1 : 0,
+                    positionPrice : fromDecimals(item.positionPrice, referenceTokenDecimals, true),
+                    currentPrice : fromDecimals(item.currentPrice, referenceTokenDecimals, true),
+                    prices : [
+                        fromDecimals(item.leftBound, referenceTokenDecimals, true),
+                        0,0,0,0,
+                        fromDecimals(item.rightBound, referenceTokenDecimals, true)
+                    ]
+                };
+                if(parseFloat(position.prices[0]) > parseFloat(position.prices[position.prices.length - 1])) {
+                    position.prices = position.prices.reverse();
+                }
+                (positions = positions || []).push(position);
+                var saved = web3utils.toBN(position.savedToken0Amount).add(web3utils.toBN(position.savedToken0Amount));
+                s = s.add(saved);
+                var after = web3utils.toBN(position.after0).add(web3utils.toBN(position.after1));
+                a = a.add(after);
+                var pool = web3utils.toBN(position.token0Amount).add(web3utils.toBN(position.token1Amount));
+                p = p.add(pool);
+                //console.log(position.index, position.poolAddress, fromDecimals(saved.toString(), referenceTokenDecimals), fromDecimals(pool.toString(), referenceTokenDecimals), fromDecimals(after.toString(), referenceTokenDecimals), fromDecimals(saved.sub(pool).toString(), referenceTokenDecimals), fromDecimals(saved.sub(after).toString(), referenceTokenDecimals));
+            }
+
+            //console.log(fromDecimals(s.toString(), referenceTokenDecimals), fromDecimals(p.toString(), referenceTokenDecimals), fromDecimals(a.toString(), referenceTokenDecimals), fromDecimals(p.sub(s).toString(), referenceTokenDecimals), fromDecimals(a.sub(s).toString(), referenceTokenDecimals));
+
+            if(!current()) return;
+            context.view.emit('initRefresh', [positions, context.toRebalance.length !== 0, isOwner]);
+
+        } catch(e) {
+            console.log(e);
+        }
+        if(current()) context.timeout = setTimeout(context.init, timeoutLimit);
+    };
+
+    async function call(to, method) {
+        var args = [];
+        for(var i in arguments) {
+            if(parseInt(i) < 2) {
+                continue;
+            }
+            args.push(arguments[i]);
+        }
+        if(method[method.length - 1] !== ')') {
+            method += '()';
+        }
+        var data = web3utils.sha3(method).substring(0, 10);
+        if(method[method.length - 2] !== '(') {
+            var argsList = method.split('(')[1];
+            argsList = argsList.substring(0, argsList.length - 1);
+            argsList = argsList.split(',');
+            data += abi.encode(argsList, args).substring(2);
+            args = args.splice(argsList.length + 1);
+        }
+        var callOptions = {
+            to,
+            data
+        };
+        args.length != 0 && (callOptions.from = args[args.length - 1]);
+        var response = await web3.currentProvider.request({
+            method: 'eth_call',
+            params: [callOptions, 'latest']
+        });
+        return response;
+    }
+
+    function timeRemaining(targetDate, elapsed) {
+        var diff = targetDate.getTime() - new Date().getTime();
+        if (diff <= 0 && !elapsed) return { days: 0, hours: 0, minutes: 0 };
+        var minutes = Math.floor(Math.abs(diff) / 60000);
+        var days = Math.floor(minutes / 1440);
+        minutes -= days * 1440;
+        var hours = Math.floor(minutes / 60);
+        minutes -= hours * 60;
+        return { targetDate, days, hours, minutes, targetDateFormatted : formatDate(targetDate) };
+    }
+
+    function dateInfo(d, beforeSeconds){
+        var before = new Date(d.getTime() - (parseInt(beforeSeconds) * 1000));
+        var now = new Date();
+        var daysPassed = (now.getTime() - before.getTime()) / (24 * 60 * 60 * 1000);
+        return {
+            original : d,
+            before,
+            daysPassed
+        };
+    }
+
+    function formatDate(dateInput) {
+        if(!dateInput) {
+            return 'Unknown';
+        }
+
+        var localDate = dateInput;
+        //localDate = new Date(localDate.getTime() + (dateInput.getTimezoneOffset() * 60000));
+
+        var days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+        var dd = String(localDate.getDate()).padStart(2,"0");
+        var mm = String(localDate.getMonth() + 1).padStart(2,"0");
+        var yyyy = localDate.getFullYear();
+        var hh = String(localDate.getHours()).padStart(2,"0");
+        var min = String(localDate.getMinutes()).padStart(2,"0");
+        return days[localDate.getDay()] + ", " + dd + "/" + mm + "/" + yyyy + " " + hh + ":" + min;
+    }
+
+    async function toEoy(timestamp) {
+        timestamp = timestamp && parseInt(timestamp) != 0 ? timestamp : (await web3.eth.getBlock(window.sessionStorage.getItem(networkStorageKey("blockNumber")) || 'latest')).timestamp;
+        var startDate = new Date(parseInt(timestamp) * 1000);
+        var endDate = new Date(startDate.getFullYear(), 11, 31, 23, 59, 59, 999);
+        var diff = endDate.getTime() - startDate.getTime();
+        var denominator = 24 * 60 * 60 * 1000;
+        return {
+            startDate,
+            endDate,
+            days : Math.ceil(diff / denominator),
+            weeks : Math.ceil(diff / (denominator * 7)),
+            months : Math.ceil(diff / (denominator * 30.44))
+        }
+    }
+
+    var wasHidden;
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+
+    function handleVisibility() {
+        if(document.visibilityState === 'hidden' && !wasHidden) {
+            return wasHidden = true;
+        }
+        if(document.visibilityState === 'visible' && wasHidden) {
+            wasHidden = false;
+            context.init();
+        }
+    }
+
+    async function convertFromEUR(amount, outputTokenAddress, outputTokenDecimals) {
+        amount = parseFloat(amount);
+        var inputToken = getStoredTokenMeta();
+        if(Object.values(inputToken).filter(it => it.symbol.toUpperCase().indexOf('EUR') !== -1).length === 0) {
+            amount /= 0.85;
+            inputToken = Object.values(inputToken).find(it => it.symbol.toUpperCase().indexOf('USD') !== -1);
+        } else {
+            inputToken = Object.values(inputToken).find(it => it.symbol.toUpperCase().indexOf('EUR') !== -1);
+        }
+        if(web3utils.toChecksumAddress(inputToken.address) === web3utils.toChecksumAddress(outputTokenAddress)) {
+            return amount;
+        }
+        amount = toDecimals(amount, inputToken.decimals);
+        var outputAmount = await context.getManager().methods.convert(voidEthereumAddress, inputToken.address, amount, outputTokenAddress).call();
+        outputAmount = fromDecimals(outputAmount, outputTokenDecimals, true);
+        return parseFloat(outputAmount);
+    }
+};
