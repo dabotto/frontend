@@ -1,6 +1,7 @@
 var Index = React.createClass({
     requiredScripts: [
         "spa/components/Disclaimer.jsx",
+        "spa/components/HowItWorks.jsx",
         "spa/components/WalletCard.jsx",
         "spa/components/ClaimRewardCard.jsx",
         "spa/components/ModeSelector.jsx",
@@ -16,7 +17,8 @@ var Index = React.createClass({
     },
     getInitialState: function() {
         return {
-            disclaimer : sessionStorage.disclaimer === 'true',
+            showDisclaimer : sessionStorage.disclaimerAccepted !== 'true',
+            showHowItWorks : false,
             walletAddress: "",
             mode: "addLiquidity",
             referenceTokenAddress: localStorage.referenceTokenAddress || "",
@@ -28,8 +30,16 @@ var Index = React.createClass({
             tokenCacheVersion: 0,
             toast: "",
             balance : null,
-            removePercent : 0
+            removePercent : "0",
+            synopticConverted : localStorage.synopticConverted === 'true'
         };
+    },
+    toggleSynopticConverted() {
+        var self = this;
+        this.setState({synopticConverted : !this.state.synopticConverted}, () => {
+            localStorage.setItem("synopticConverted", self.state.synopticConverted ? 'true' : false);
+            self.controller.init();
+        });
     },
     bumpTokenCache: function() {
         this.setState({ tokenCacheVersion: Date.now() });
@@ -98,12 +108,11 @@ var Index = React.createClass({
             }, 2200);
         });
     },
-    removeLiquidity : function(address, value, readonly) {
+    removeLiquidity : function(address, removePercent, readonly) {
         var self = this;
-        var percent = toDecimals(value/100, 18);
-        this.setState({amountToBeRemoved : readonly ? null : this.state.amountToBeRemoved, removePercent : value}, function() {
+        this.setState({amountToBeRemoved : readonly ? null : this.state.amountToBeRemoved, removePercent}, function() {
             self.removeLiquidityTimeout && clearTimeout(self.removeLiquidityTimeout);
-            value != 0 && (self.removeLiquidityTimeout = setTimeout(() => self.controller.removeLiquidity(address, percent, readonly).then(result => {
+            parseFloat(removePercent) != 0 && (self.removeLiquidityTimeout = setTimeout(() => self.controller.removeLiquidity(address, toDecimals(removePercent, 16), readonly).then(result => {
                 readonly && this.setState({amountToBeRemoved : result.removedAmount});
             }), readonly ? 700 : 0));
         });
@@ -125,11 +134,15 @@ var Index = React.createClass({
         summary && (next.summary = summary);
         var self = this;
         this.setState(next, () => {
+            self.controller.refreshBalance();
             self.removeLiquidity(self.state.referenceTokenAddress, self.state.removePercent, true);
         });
     },
-    onDisclaimerDismiss() {
-        this.setState({disclaimer : true}, () => window.sessionStorage.setItem('disclaimer', 'true'));
+    toggleDisclaimer() {
+        this.setState({showDisclaimer : !this.state.showDisclaimer}, () => window.sessionStorage.setItem('disclaimerAccepted', 'true'));
+    },
+    toggleHowItWorks() {
+        this.setState({showHowItWorks : !this.state.showHowItWorks});
     },
     render: function() {
 
@@ -139,8 +152,19 @@ var Index = React.createClass({
         return (
             <div className = "dashboard-shell">
                 <div className = "app-stack">
-                    {!this.state.disclaimer ? <Disclaimer onDismiss={this.onDisclaimerDismiss}/> : null}
-                    {this.state.disclaimer ? <>
+                    {this.state.showHowItWorks ? <HowItWorks onDismiss={this.toggleHowItWorks}/> : this.state.showDisclaimer ? <Disclaimer onDismiss={this.toggleDisclaimer} onHowItWorks={this.toggleHowItWorks}/> : <>
+                        <div className = "glass-card card-pad">
+                            <div className = "card-header">
+                                <button className = "button-base button-primary" onClick={this.toggleHowItWorks}>
+                                    <i className = "fa-solid fa-cog"></i>
+                                    How it works
+                                </button>
+                                <button className = "button-base button-primary" onClick={this.toggleDisclaimer}>
+                                    <i className = "fa-solid fa-legal"></i>
+                                    Disclaimer
+                                </button>
+                            </div>
+                        </div>
                         <WalletCard
                             walletAddress = {this.state.walletAddress}
                             onWallet = {this.onWallet}
@@ -171,6 +195,7 @@ var Index = React.createClass({
                                         onApprove = {this.approveToken}
                                         toast = {this.state.toast}
                                         onAddLiquidity = {this.addLiquidity}
+                                        refreshBalance={this.props.refreshBalance}
                                     />
                                 ) : null}
                                 {this.state.mode === "removeLiquidity" ? (
@@ -184,13 +209,16 @@ var Index = React.createClass({
                             </div> : null}
                         </>) : null}
                         <PositionStatusSynopsis
+                            token={referenceToken}
                             isOwner={this.state.isOwner}
                             items={this.state.positions}
                             rebalance={this.state.rebalance}
                             onRebalance={this.controller.rebalance}
+                            synopticConverted={this.state.synopticConverted}
+                            toggleSynopticConverted={this.toggleSynopticConverted}
                         />
                         <div className = "footer-note">{"\u00a0"}</div>
-                    </> : null}
+                    </>}
                 </div>
                 {this.state.tokenPickerOpen ? (
                     <TokenPickerModal

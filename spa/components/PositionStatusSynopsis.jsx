@@ -12,13 +12,10 @@ var PositionStatusSynopsis = React.createClass({
     },
     getScoreClass: function(score) {
         if (score === 0) {
+            return "position-score position-score-blue";
+        }
+        if (score === 1) {
             return "position-score position-score-green";
-        }
-        if (score === -1 || score === 1) {
-            return "position-score position-score-yellow";
-        }
-        if (score === -2 || score === 2) {
-            return "position-score position-score-orange";
         }
         return "position-score position-score-red";
     },
@@ -43,13 +40,13 @@ var PositionStatusSynopsis = React.createClass({
         return n.toLocaleString("en-US", { maximumFractionDigits: 8 });
     },
     getStops: function(item) {
-        return [
+        return !item.prices ? [] : [
             { key: "lowerBound", label: "Out", value: this.toNumber(item.prices[0]), kind: "edge" },
-            { key: "dangerZoneStartLeft", label: "Danger", value: this.toNumber(item.prices[1]), kind: "danger" },
-            { key: "leftBound", label: "Warning", value: this.toNumber(item.prices[2]), kind: "bound" },
+            //{ key: "dangerZoneStartLeft", label: "Danger", value: this.toNumber(item.prices[1]), kind: "danger" },
+            //{ key: "leftBound", label: "Warning", value: this.toNumber(item.prices[2]), kind: "bound" },
             { key: "positionPrice", label: "OK", value: this.toNumber(item.positionPrice), kind: "position" },
-            { key: "rightBound", label: "Warning", value: this.toNumber(item.prices[3]), kind: "bound" },
-            { key: "dangerZoneStartRight", label: "Danger", value: this.toNumber(item.prices[4]), kind: "danger" },
+            //{ key: "rightBound", label: "Warning", value: this.toNumber(item.prices[3]), kind: "bound" },
+            //{ key: "dangerZoneStartRight", label: "Danger", value: this.toNumber(item.prices[4]), kind: "danger" },
             { key: "upperBound", label: "Out", value: this.toNumber(item.prices[5]), kind: "edge" }
         ];
     },
@@ -118,6 +115,13 @@ var PositionStatusSynopsis = React.createClass({
             }
         ];
 
+        segments = [{
+            minValue: this.toNumber(item.prices[0]),
+            maxValue: this.toNumber(item.prices[5]),
+            minPct: positions.lowerBound,
+            maxPct: positions.upperBound
+        }];
+
         if (currentPrice <= segments[0].minValue) {
             return segments[0].minPct;
         }
@@ -154,10 +158,13 @@ var PositionStatusSynopsis = React.createClass({
         );
     },
     getScoreLabel: function(score) {
-        if (score === 0) return "safe";
-        if (Math.abs(score) === 1) return "warning";
-        if (Math.abs(score) === 2) return "danger";
+        if (score === 0) return "Collecting";
+        if (Math.abs(score) === 1) return "in profit";
+        if (Math.abs(score) === 2) return "unbalanced";
         return "unprofitable";
+    },
+    formatAmount(amount, decimals, symbol) {
+        return (this.props.synopticConverted ? `${symbol}: ` : "") + formatMoney(fromDecimals(amount, this.props.synopticConverted ? this.props.token.decimals : decimals, true), 4) + " " + (this.props.synopticConverted ? this.props.token.symbol : symbol);
     },
     renderCard: function(item, index) {
         var score = item.statusResult;
@@ -185,10 +192,19 @@ var PositionStatusSynopsis = React.createClass({
                 </div>
                 <div className = "position-synopsis-head">
                     <div className = "position-synopsis-head-left">
-                        Saved amounts: {this.formatValue(parseFloat(fromDecimals(item.savedToken0Amount, item.decimals0, true)))} {item.symbol0} / {this.formatValue(parseFloat(fromDecimals(item.savedToken1Amount, item.decimals1, true)))} {item.symbol1}
+                        Saved amounts: {this.formatAmount(item.savedToken0Amount, item.decimals0, item.symbol0)} / {this.formatAmount(item.savedToken1Amount, item.decimals1, item.symbol1)}
                         <br/>
                         <br/>
-                        Current amounts: {this.formatValue(parseFloat(fromDecimals(item.token0Amount, item.decimals0, true)))} {item.symbol0} / {this.formatValue(parseFloat(fromDecimals(item.token1Amount, item.decimals1, true)))} {item.symbol1}
+                        Current amounts: {this.formatAmount(item.token0Amount, item.decimals0, item.symbol0)} / {this.formatAmount(item.token1Amount, item.decimals1, item.symbol1)}
+                        <br/>
+                        <br/>
+                        Difference: {this.formatAmount(item.difference0, item.decimals0, item.symbol0)} / {this.formatAmount(item.difference1, item.decimals1, item.symbol1)}
+                        <br/>
+                        <br/>
+                        After rebalance: {this.formatAmount(item.after0, item.decimals0, item.symbol0)} / {this.formatAmount(item.after1, item.decimals1, item.symbol1)}
+                        <br/>
+                        <br/>
+                        Surplus: {this.formatAmount(item.surplus0, item.decimals0, item.symbol0)} / {this.formatAmount(item.surplus1, item.decimals1, item.symbol1)}
                     </div>
                 </div>
                 <div className = "position-chart-wrap">
@@ -205,7 +221,13 @@ var PositionStatusSynopsis = React.createClass({
     render: function() {
         return (
             <div className = "glass-card card-pad">
-                <div className = "card-title">Position status</div>
+                <div className = "card-title">
+                    Position status
+                    {this.props.items && this.props.items.length > 0 ? <label style = {{ float: "right", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                        <input type="checkbox" checked={this.props.synopticConverted} onChange={this.props.toggleSynopticConverted}/>
+                        <span>Convert amounts in {this.props.token.symbol}</span>
+                    </label> : null}
+                </div>
                 <div className = "card-copy">{!this.props.items ? "Loading status of the positions..." : this.props.items.length === 0 ? "No positions to show" : "Let the bot automatically rebalance them or do it by yourself"}</div>
                 {this.props.items && this.props.items.length > 0 ? <>
                     <div className = "section-divider"></div>

@@ -2,13 +2,7 @@ var IndexController = function(view) {
     var context = this;
     context.view = view;
 
-    var tickerConverter = {
-        "EURC" : "€",
-        "USDC" : "$"
-    }
-
     context.refreshBalance = async function refreshBalance() {
-        context.refreshBalanceTimeout && clearTimeout(context.refreshBalanceTimeout);
         if(!web3?.currentProvider || !context?.view?.state?.walletAddress || context?.view?.state?.mode === 'none' || !context.view.state[context?.view?.state?.mode + "TokenAddress"]) {
             return context?.view?.setState({balance : null, allowance : null});
         }
@@ -20,14 +14,13 @@ var IndexController = function(view) {
             allowance = balance = await web3.eth.getBalance(from);
         } else {
             balance = abi.decode(["uint256"], await call(tokenAddress, "balanceOf(address)", from))[0].toString();
-            allowance = abi.decode(["uint256"], await call(tokenAddress, "allowance(address,address)", from, context.codeAddress))[0].toString();
+            allowance = abi.decode(["uint256"], await call(tokenAddress, "allowance(address,address)", from, window.context.managerAddress))[0].toString();
         }
         context?.view?.setState({balance, allowance});
-        context.refreshBalanceTimeout = setTimeout(context.refreshBalance, 7000);
     }
 
     context.approveForAddLiquidity = function approveForAddLiquidity(address, value) {
-        return prepareAndSendTx((new web3.eth.Contract(window.context.IERC20ABI, address)).methods.approve(context.codeAddress, value), {
+        return prepareAndSendTx((new web3.eth.Contract(window.context.IERC20ABI, address)).methods.approve(window.context.managerAddress, value), {
             returnReceipt : true,
             throwError : true
         });
@@ -47,7 +40,7 @@ var IndexController = function(view) {
     }
 
     context.rebalance = function rebalance() {
-        return prepareAndSendTx(context.manager.methods.rebalance(context.toRebalance));
+        return prepareAndSendTx(context.manager.methods.pools(context.toRebalance));
     }
 
     context.claimReward = function claimReward() {
@@ -76,8 +69,9 @@ var IndexController = function(view) {
         try {
             var receipt = await web3.eth.sendTransaction(tx);
             console.log(receipt);
-            await new Promise(ok => setTimeout(ok, 2000));
+            context.init();
             if(options.returnReceipt) {
+                await new Promise(ok => setTimeout(ok, 2000));
                 return receipt;
             } else {
                 window.open('https://basescan.org/tx/' + receipt.transactionHash, '_blank');
@@ -90,36 +84,31 @@ var IndexController = function(view) {
                 alert("Error: " + (e.message || e).toString());
             }
         }
-        context.init();
     }
 
     context.init = async function init() {
         context.timeout && clearTimeout(context.timeout);
         var timeoutLimit = 10000;
-        var initRefreshData;
         if(!web3?.currentProvider || !context?.view?.state?.walletAddress || !context?.view?.state?.referenceTokenAddress) {
             return context.timeout = setTimeout(context.init, timeoutLimit);
         }
         try {
             context.manager = context.manager || new web3.eth.Contract(window.context.ManagerABI, window.context.managerAddress);
-            context.codeAddress = context.codeAddress || await context.manager.methods.code().call();
             var from = web3util.utils.toChecksumAddress(context.view.state.walletAddress);
             context.toRebalance = [];
             var manager = context.manager;
-            var rebalanceMinutes = parseInt(15);
-            var {oldTimestamp, oldBlockNumber, rebalanceSeconds} = await retrieveOldBlockNumberAndTimestamp(rebalanceMinutes);
             var referenceTokenAddress = context.view.state.referenceTokenAddress;
             var referenceToken = getTokenMetaByAddress(referenceTokenAddress);
-            var referenceTokenDecimals = referenceToken.decimals;//abi.decode(["uint8"], await call(referenceTokenAddress, "decimals"))[0];
-            var referenceTokenTicker = referenceToken.symbol;//abi.decode(["string"], await call(referenceTokenAddress, "symbol"))[0];
-            referenceTokenTicker = (tickerConverter[referenceTokenTicker] || referenceTokenTicker) + " ";
+            var referenceTokenDecimals = referenceToken.decimals;
+            var referenceTokenTicker = referenceToken.symbol;
             var isOwner = web3util.utils.toChecksumAddress(await manager.methods.owner().call()) === from;
             var claimRewardResult = await manager.methods.claimReward(referenceTokenAddress).call({from});
 
             var perc = parseFloat(fromDecimals(claimRewardResult.participationPercentage, 18, true));
 
-            var globalStatus = await manager.methods.status(referenceTokenAddress).call();
-            var data = globalStatus.statuses;
+            var synopticConverted = window.localStorage.synopticConverted === 'true'
+
+            var globalStatus = await manager.methods.status(referenceTokenAddress, synopticConverted).call();
             var nextSeasonReward = globalStatus.nextSeasonReward;
             nextSeasonReward = parseInt(nextSeasonReward) * perc;
             nextSeasonReward = numberToString(nextSeasonReward).split('.')[0];
@@ -148,10 +137,50 @@ var IndexController = function(view) {
             var monthly = daily * 30 * (end.months < 1 ? end.months : 1);
             var yearly = daily * end.days;
 
-            var messages = [];
             var positions = [];
 
-            context.view.emit('initRefresh', [undefined, false, isOwner, fromDecimals(claimableReward, referenceTokenDecimals, true), {
+            for(var item of globalStatus.syncedPools) {
+                item.rebalanceNeeded && context.toRebalance.push(item.index);
+                var token0 = item.token0Address;
+                var symbol0 = abi.decode(["string"], await call(token0, "symbol"))[0];
+                var decimals0 = abi.decode(["uint8"], await call(token0, "decimals"))[0];
+                var token1 = item.token1Address;
+                var symbol1 = abi.decode(["string"], await call(token1, "symbol"))[0];
+                var decimals1 = abi.decode(["uint8"], await call(token1, "decimals"))[0];
+                var position = {
+                    poolAddress : item.poolAddress,
+                    token0,
+                    symbol0,
+                    decimals0,
+                    token1,
+                    symbol1,
+                    decimals1,
+                    savedToken0Amount : item.savedAmount0,
+                    savedToken1Amount : item.savedAmount1,
+                    token0Amount : item.oldAmount0,
+                    token1Amount : item.oldAmount1,
+                    difference0 : item.difference0,
+                    difference1 : item.difference1,
+                    surplus0 : item.surplus0,
+                    surplus1 : item.surplus1,
+                    after0 : item.rebalancedAmount0,
+                    after1 : item.rebalancedAmount1,
+                    statusResult : !item.rebalanceNeeded ? 0 : item.surplus0 !== '0' || item.surplus1 !== '0' ? 1 : 2,
+                    positionPrice : fromDecimals(item.positionPrice, referenceTokenDecimals, true),
+                    currentPrice : fromDecimals(item.currentPrice, referenceTokenDecimals, true),
+                    prices : [
+                        fromDecimals(item.leftBound, referenceTokenDecimals, true),
+                        0,0,0,0,
+                        fromDecimals(item.rightBound, referenceTokenDecimals, true)
+                    ]
+                };
+                if(parseFloat(position.prices[0]) > parseFloat(position.prices[position.prices.length - 1])) {
+                    position.prices = position.prices.reverse();
+                }
+                positions.push(position);
+            }
+
+            context.view.emit('initRefresh', [positions, context.toRebalance.length !== 0, isOwner, claimableReward, {
                 nextSeasonTimeout: nextRebalance,
                 nextSeasonDate,
                 lastAddedLiquidity : formatDate(end.startDate),
@@ -168,127 +197,10 @@ var IndexController = function(view) {
                 hasParticipation : perc !== 0
             }]);
 
-            var historicalData;
-            try {
-                historicalData = await manager.methods.status(referenceTokenAddress).call(undefined, web3.utils.numberToHex(oldBlockNumber));
-                historicalData = historicalData.statuses;
-            } catch(e) {}
-
-            for(var i in data) {
-                var warningZoneTimeout = false;
-                if(data[i].result !== '0') {
-                    context.toRebalance.push(i);
-                }
-                if(data[i].result !== '0' && (parseInt(oldTimestamp) - parseInt(data[i].positionTime) >= rebalanceSeconds) && historicalData && historicalData[i].result === data[i].result) {
-                    warningZoneTimeout = true;
-                }
-                var statusResult = parseInt(data[i].result);
-                var lowerBound = data[i].lowerBound;
-                var upperBound = data[i].upperBound;
-                var bounds = [lowerBound, upperBound];
-                data[i].currentPrice !== '0' && bounds.push(data[i].currentPrice);
-                data[i].positionPrice !== '0' && bounds.push(data[i].positionPrice);
-                data[i].leftBound !== '0' && bounds.push(data[i].leftBound);
-                data[i].rightBound !== '0' && bounds.push(data[i].rightBound);
-                data[i].dangerZoneStartLeft !== '0' && bounds.push(data[i].dangerZoneStartLeft);
-                data[i].dangerZoneStartRight !== '0' && bounds.push(data[i].dangerZoneStartRight);
-                bounds = bounds.filter(it => it !== '0').filter((it, i, arr) => arr.indexOf(it) === i).sort((a,b) => parseInt(web3.utils.toBN(a).sub(web3.utils.toBN(b))));
-                var prices = bounds.map(() => '0');
-                try {
-                    prices = await sqrtToOutputPrice(manager.options.address, data[i].poolAddress, bounds, referenceTokenAddress);
-                } catch(e) {}
-                var reverse = parseInt(prices[0]) > parseInt(prices[prices.length - 1]);
-                if(reverse) {
-                    bounds = bounds.reverse();
-                    prices = prices.reverse();
-                    statusResult = parseInt(String(-parseInt(statusResult)));
-                }
-                prices = prices.map(it => parseFloat(fromDecimals(it, referenceTokenDecimals, true)));
-                var token0 = abi.decode(["address"], await call(data[i].poolAddress, "token0"))[0];
-                var symbol0 = abi.decode(["string"], await call(token0, "symbol"))[0];
-                var decimals0 = abi.decode(["uint8"], await call(token0, "decimals"))[0];
-                var token1 = abi.decode(["address"], await call(data[i].poolAddress, "token1"))[0];
-                var symbol1 = abi.decode(["string"], await call(token1, "symbol"))[0];
-                var decimals1 = abi.decode(["uint8"], await call(token1, "decimals"))[0];
-                var position = {
-                    poolAddress : data[i].poolAddress,
-                    token0,
-                    symbol0,
-                    decimals0,
-                    token1,
-                    symbol1,
-                    decimals1,
-                    token0Amount : data[i].token0Amount,
-                    token1Amount : data[i].token1Amount,
-                    savedToken0Amount : data[i].savedToken0Amount,
-                    savedToken1Amount : data[i].savedToken1Amount,
-                    statusResult,
-                    prices : []
-                };
-                var message = "";
-                var sqrtPriceX96Message = "";
-                var leftBound = "[(";
-                var rightBound = ")]";
-                for(var z in bounds) {
-                    var sqrtPriceX96 = bounds[z = parseInt(z)];
-                    var price = prices[z] === '0' ? sqrtPriceX96 : prices[z];
-                    message += putSpaceBefore(message);
-                    sqrtPriceX96Message += putSpaceBefore(sqrtPriceX96Message);
-
-                    if(sqrtPriceX96 === lowerBound || sqrtPriceX96 === upperBound) {
-                        message += price;
-                        sqrtPriceX96Message += sqrtPriceX96;
-                        position.prices.push(price);
-                    } else if(sqrtPriceX96 === data[i].leftBound) {
-                        message += ((reverse ? "(" : "") + price + (reverse ? "" : ")"));
-                        sqrtPriceX96Message += ((reverse ? "(" : "") + sqrtPriceX96 + (reverse ? "" : ")"));
-                        position.prices.push(price);
-                    } else if(sqrtPriceX96 === data[i].dangerZoneStartLeft) {
-                        message += ((reverse ? "| " : "") + price + (reverse ? "" : " |"));
-                        sqrtPriceX96Message += ((reverse ? "| " : "") + sqrtPriceX96 + (reverse ? "" : " |"));
-                        position.prices.push(price);
-                    } else if(sqrtPriceX96 === data[i].currentPrice) {
-                        if(z === bounds.length - 1) {
-                            message += (rightBound + " ");
-                            sqrtPriceX96Message += (rightBound + " ");
-                            rightBound = "";
-                        }
-                        message += ("-> " + price + " <-");
-                        sqrtPriceX96Message += ("-> " + sqrtPriceX96 + " <-");
-                        position.currentPrice = price;
-                        if(z === 0) {
-                            message += (" " + leftBound);
-                            sqrtPriceX96Message += (" " + leftBound);
-                            leftBound = "";
-                        }
-                    } else if(sqrtPriceX96 === data[i].positionPrice) {
-                        message += ("{" + price + "}");
-                        sqrtPriceX96Message += ("{" + sqrtPriceX96 + "}");   
-                        position.positionPrice = price;
-                    } else if(sqrtPriceX96 === data[i].dangerZoneStartRight) {
-                        message += ((reverse ? "" : "| ") + price + (reverse ? " |" : ""));
-                        sqrtPriceX96Message += ((reverse ? "" : "| ") + sqrtPriceX96 + (reverse ? " |" : ""));
-                        position.prices.push(price);
-                    } else if(sqrtPriceX96 === data[i].rightBound) {
-                        message += ((reverse ? "" : "(") + price + (reverse ? ")" : ""));
-                        sqrtPriceX96Message += ((reverse ? "" : "(") + sqrtPriceX96 + (reverse ? ")" : ""));
-                        position.prices.push(price);
-                    }
-                }
-
-                message = leftBound + message + rightBound;
-                sqrtPriceX96Message = leftBound + sqrtPriceX96Message + rightBound;
-                //console.log(symbol0 + "/" + symbol1, data[i].poolAddress, "Status:", statusResult, "\n\n", message);
-
-                messages.push(`${data[i].poolAddress} ${reverse ? symbol1 : symbol0}/${reverse ? symbol0 : symbol1} Status: ${(statusResult !== 0 ? "<b>" : "") + statusResult + (statusResult !== 0 ? "</b>" : "") + (warningZoneTimeout ? " <b><u>[WARNING ZONE TIMEOUT]</u></b>" : "")}<br/>${message.split('-> ').join('<b>-> ').split(' <-').join(' <-</b>')}`);
-
-                positions.push(position);
-            }
-            initRefreshData = [positions, context.toRebalance.length !== 0, isOwner];
         } catch(e) {
             console.log(e);
         }
-        return void(context.view.emit('initRefresh', initRefreshData), context.timeout = setTimeout(context.init, timeoutLimit));
+        return void(context.timeout = setTimeout(context.init, timeoutLimit));
     };
 
     async function call(to, method) {
@@ -317,48 +229,6 @@ var IndexController = function(view) {
         args.length != 0 && (callOptions.from = args[args.length - 1]);
         var response = await web3.eth.call(callOptions);
         return response;
-    }
-
-    async function sqrtToOutputPrice(to, poolAddress, prices, outputTokenAddress) {
-        try {
-            var data = (web3.utils.sha3("sqrtToOutputPrice(address,uint160[],address)").substring(0, 10)) + abi.encode(["address", "uint160[]", "address"], [poolAddress, prices, outputTokenAddress]).substring(2);
-            data = await web3.eth.call({
-                to,
-                data
-            });
-            data = abi.decode(["uint256[]"], data)[0];
-            data = [...data].map(it => it.toString());
-            return data;
-        } catch(e) {
-            console.log("PoolAddress", poolAddress, "prices", prices);
-            console.trace(e);
-            throw e;
-        }
-    }
-    
-    function putSpaceBefore(message) {
-        return message !== '' && message[message.length - 1] !== ' ' ? " " : "";
-    }
-
-    async function retrieveOldBlockNumberAndTimestamp(rebalanceMinutes) {
-        var rebalanceSeconds = rebalanceMinutes * 60;
-        var blockNumber = await web3.eth.getBlock('latest');
-        var actualTimestamp = parseInt(blockNumber.timestamp);
-        blockNumber = parseInt(blockNumber.number);
-        var times = 30;
-        var oldBlockNumber;
-        var oldTimestamp;
-        while(true) {
-            var oldBlockNumber = await web3.eth.getBlock(blockNumber - times);
-            var oldTimestamp = parseInt(oldBlockNumber.timestamp);
-            oldBlockNumber = parseInt(oldBlockNumber.number);
-            var timestampDifference = actualTimestamp - oldTimestamp;
-            if(timestampDifference >= rebalanceSeconds) {
-                break;
-            }
-            times += parseInt(rebalanceSeconds / (timestampDifference / (blockNumber - oldBlockNumber)));
-        }
-        return {oldBlockNumber, oldTimestamp, rebalanceSeconds};
     }
 
     function timeRemaining(targetDate) {

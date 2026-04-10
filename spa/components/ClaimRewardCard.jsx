@@ -45,7 +45,6 @@ var ClaimRewardCard = React.createClass({
                     <div className = "section-divider"></div>
 
                     <div className = "position-kpi-block">
-
                         <div className = "position-kpi-item">
                             <div className = "position-kpi-label">
                                 Next season: {this.props.summary.nextSeasonDate}
@@ -54,14 +53,12 @@ var ClaimRewardCard = React.createClass({
                                 {this.props.summary.nextSeasonTimeout}
                             </div>
                         </div>
-
                     </div>
 
                     <div className = "position-collecting-box">
-
                         <div className = "position-collecting-layout">
                             <div className = "position-collecting-now">
-                                <div className = "position-collecting-now-label">Fees you're generating this season</div>
+                                <div className = "position-collecting-now-label">Fees you're generating for the next season</div>
                                 <div className = "position-collecting-now-value">{this.props.summary.collectNow} {token?.symbol}</div>
                             </div>
                         </div>
@@ -72,29 +69,24 @@ var ClaimRewardCard = React.createClass({
                         </div>
 
                         <div className = "position-collecting-layout">
-
                             <div className = "position-collecting-grid">
                                 <div className = "position-collecting-item">
                                     <div className = "position-collecting-item-label">Daily</div>
                                     <div className = "position-collecting-item-value">{this.props.summary.collectDay} {token?.symbol}</div>
                                 </div>
-
                                 <div className = "position-collecting-item">
                                     <div className = "position-collecting-item-label">Weekly</div>
                                     <div className = "position-collecting-item-value">{this.props.summary.collectWeek} {token?.symbol}</div>
                                 </div>
-
                                 <div className = "position-collecting-item">
                                     <div className = "position-collecting-item-label">Monthly</div>
                                     <div className = "position-collecting-item-value">{this.props.summary.collectMonth} {token?.symbol}</div>
                                 </div>
-
                                 <div className = "position-collecting-item">
                                     <div className = "position-collecting-item-label">End of Year</div>
                                     <div className = "position-collecting-item-value">{this.props.summary.collectYear} {token?.symbol}</div>
                                 </div>
                             </div>
-
                         </div>
                     </div>
 
@@ -122,7 +114,7 @@ var ClaimRewardCard = React.createClass({
 
                         <div className = {
                             "position-kpi-card " +
-                            (this.props.summary.pnl?.indexOf('-') === -1 ? "position-pnl-positive" : "position-pnl-negative")
+                            (this.props.summary.pnl === '0' ? "" : this.props.summary.pnl?.indexOf('-') === -1 ? "position-pnl-positive" : "position-pnl-negative")
                         }>
                             <div className = "position-kpi-label">
                                 Profit and loss
@@ -134,19 +126,21 @@ var ClaimRewardCard = React.createClass({
 
                     </div>
                 </>}
-                <div className = "metric-card">
-                    <div className = "metric-label">
-                        Claimable reward
+                {!claimableValue || claimableValue === '0' ? null : <>
+                    <div className = "metric-card">
+                        <div className = "metric-label">
+                            Claimable reward
+                        </div>
+                        <div className = "big-value">
+                            {claimableValue ? fromDecimals(claimableValue, token.decimals, true) + " " + token.symbol : "--"}
+                        </div>
                     </div>
-                    <div className = "big-value">
-                        {claimableValue ? claimableValue + " " + token.symbol : "--"}
-                    </div>
-                </div>
-                <div className = "section-divider"></div>
-                <button className = "button-base button-primary" disabled={!token || !claimableValue} onClick={this.props.onClaimReward}>
-                    <i className = "fa-solid fa-hand-holding-dollar"></i>
-                    {token ? "Claim now" : "Select a token first"}
-                </button>
+                    <div className = "section-divider"></div>
+                    <button className = "button-base button-primary" disabled={!token || !claimableValue} onClick={this.props.onClaimReward}>
+                        <i className = "fa-solid fa-hand-holding-dollar"></i>
+                        {token ? "Claim now" : "Select a token first"}
+                    </button>
+                </>}
             </div>
         );
     }
