@@ -2,23 +2,16 @@ var PositionStatusSynopsis = React.createClass({
     getFixedStopPositions: function() {
         return {
             lowerBound: 8,
-            dangerZoneStartLeft: 20,
-            leftBound: 33.33,
             positionPrice: 50,
-            rightBound: 66.66,
-            dangerZoneStartRight: 80,
             upperBound: 92
         };
     },
     getScoreClass: function(score) {
         if (score === 0) {
+            return "position-score position-score-blue";
+        }
+        if (score === 1) {
             return "position-score position-score-green";
-        }
-        if (score === -1 || score === 1) {
-            return "position-score position-score-yellow";
-        }
-        if (score === -2 || score === 2) {
-            return "position-score position-score-orange";
         }
         return "position-score position-score-red";
     },
@@ -43,30 +36,15 @@ var PositionStatusSynopsis = React.createClass({
         return n.toLocaleString("en-US", { maximumFractionDigits: 8 });
     },
     getStops: function(item) {
-        return [
+        return !item.prices ? [] : [
             { key: "lowerBound", label: "Out", value: this.toNumber(item.prices[0]), kind: "edge" },
-            { key: "dangerZoneStartLeft", label: "Danger", value: this.toNumber(item.prices[1]), kind: "danger" },
-            { key: "leftBound", label: "Warning", value: this.toNumber(item.prices[2]), kind: "bound" },
             { key: "positionPrice", label: "OK", value: this.toNumber(item.positionPrice), kind: "position" },
-            { key: "rightBound", label: "Warning", value: this.toNumber(item.prices[3]), kind: "bound" },
-            { key: "dangerZoneStartRight", label: "Danger", value: this.toNumber(item.prices[4]), kind: "danger" },
             { key: "upperBound", label: "Out", value: this.toNumber(item.prices[5]), kind: "edge" }
         ];
     },
-    toPercent: function(value, metrics) {
-        var n = this.toNumber(value);
-        var pct = ((n - metrics.min) / metrics.span) * 100;
-        if (pct < 0) {
-            return 0;
-        }
-        if (pct > 100) {
-            return 100;
-        }
-        return pct;
-    },
-    renderStop: function(stop) {
-        var positions = this.getFixedStopPositions();
-        var left = positions[stop.key];
+    renderStop: function(stop, item) {
+        var left = this.getPricePercent(stop.value, item);
+        if(left === null) return null;
         return (
             <div key = {stop.key} className = {"position-stop position-stop-" + stop.kind} style = {{ left: left + "%" }}>
                 <div className = "position-stop-line"></div>
@@ -75,75 +53,33 @@ var PositionStatusSynopsis = React.createClass({
             </div>
         );
     },
-    getCurrentPricePercent: function(item) {
-        var currentPrice = this.toNumber(item.currentPrice);
+    getPricePercent: function(value, item) {
+        if(!item.prices) return null;
         var positions = this.getFixedStopPositions();
-
-        var segments = [
-            {
-                minValue: this.toNumber(item.prices[0]),
-                maxValue: this.toNumber(item.prices[1]),
-                minPct: positions.lowerBound,
-                maxPct: positions.dangerZoneStartLeft
-            },
-            {
-                minValue: this.toNumber(item.prices[1]),
-                maxValue: this.toNumber(item.prices[2]),
-                minPct: positions.dangerZoneStartLeft,
-                maxPct: positions.leftBound
-            },
-            {
-                minValue: this.toNumber(item.prices[2]),
-                maxValue: this.toNumber(item.positionPrice),
-                minPct: positions.leftBound,
-                maxPct: positions.positionPrice
-            },
-            {
-                minValue: this.toNumber(item.positionPrice),
-                maxValue: this.toNumber(item.prices[3]),
-                minPct: positions.positionPrice,
-                maxPct: positions.rightBound
-            },
-            {
-                minValue: this.toNumber(item.prices[3]),
-                maxValue: this.toNumber(item.prices[4]),
-                minPct: positions.rightBound,
-                maxPct: positions.dangerZoneStartRight
-            },
-            {
-                minValue: this.toNumber(item.prices[4]),
-                maxValue: this.toNumber(item.prices[5]),
-                minPct: positions.dangerZoneStartRight,
-                maxPct: positions.upperBound
-            }
-        ];
-
-        if (currentPrice <= segments[0].minValue) {
-            return segments[0].minPct;
+        var price = Number(value);
+        var first = Number(item.prices && item.prices[0]);
+        var last = Number(item.prices && item.prices[5]);
+        var center = Number(item.positionPrice);
+        if(value === null || value === undefined || value === '' || !isFinite(price) || !isFinite(first) || !isFinite(last)) return null;
+        var lower = Math.min(first, last);
+        var upper = Math.max(first, last);
+        if(lower === upper) return price === lower ? positions.positionPrice : price < lower ? positions.lowerBound : positions.upperBound;
+        var min = lower, max = upper;
+        var left = positions.lowerBound, right = positions.upperBound;
+        if(center > lower && center < upper) {
+            if(price <= center) { max = center; right = positions.positionPrice; }
+            else { min = center; left = positions.positionPrice; }
         }
-
-        if (currentPrice >= segments[segments.length - 1].maxValue) {
-            return segments[segments.length - 1].maxPct;
-        }
-
-        for (var i = 0; i < segments.length; i++) {
-            var segment = segments[i];
-
-            if (currentPrice >= segment.minValue && currentPrice <= segment.maxValue) {
-                if (segment.maxValue === segment.minValue) {
-                    return segment.minPct;
-                }
-
-                var ratio = (currentPrice - segment.minValue) / (segment.maxValue - segment.minValue);
-                return segment.minPct + ((segment.maxPct - segment.minPct) * ratio);
-            }
-        }
-
-        return positions.positionPrice;
+        var ratio = Math.max(0, Math.min(1, (price - min) / (max - min)));
+        return left + (right - left) * ratio;
+    },
+    getCurrentPricePercent: function(item) {
+        return this.getPricePercent(item.currentPrice, item);
     },
     renderCurrentPrice: function(item) {
         var currentPrice = this.toNumber(item.currentPrice);
         var left = this.getCurrentPricePercent(item);
+        if(left === null) return null;
         return (
             <div className = "position-current-price" style = {{ left: left + "%" }}>
                 <div className = "position-current-arrow">
@@ -154,10 +90,13 @@ var PositionStatusSynopsis = React.createClass({
         );
     },
     getScoreLabel: function(score) {
-        if (score === 0) return "safe";
-        if (Math.abs(score) === 1) return "warning";
-        if (Math.abs(score) === 2) return "danger";
+        if (score === 0) return "Collecting";
+        if (Math.abs(score) === 1) return "in profit";
+        if (Math.abs(score) === 2) return "unbalanced";
         return "unprofitable";
+    },
+    formatAmount(amount, decimals, symbol, spaces) {
+        return (this.props.synopticConverted ? `${symbol}: ` : "") + formatMoney(fromDecimals(amount, this.props.synopticConverted ? this.props.token.decimals : decimals, true), spaces || 4) + " " + (this.props.synopticConverted ? this.props.token.symbol : symbol);
     },
     renderCard: function(item, index) {
         var score = item.statusResult;
@@ -168,7 +107,7 @@ var PositionStatusSynopsis = React.createClass({
                     <div className = "position-synopsis-head-left">
                         <a
                             className = "position-address-link"
-                            href = {"https://basescan.org/address/" + item.poolAddress}
+                            href = {"https://dexscreener.com/" + getAppNetwork().dexscreenerNetwork + "/" + item.poolAddress}
                             target = "_blank"
                             rel = "noreferrer"
                         >
@@ -177,7 +116,9 @@ var PositionStatusSynopsis = React.createClass({
                         </a>
                     </div>
                     <div className = "position-synopsis-head-right">
-                        <div className = "position-pair-label"><a target="_blank" href={"https://basescan.org/token/" + item.token0}>{item.symbol0}</a> / <a target="_blank" href={"https://basescan.org/address/" + item.token1}>{item.symbol1}</a></div>
+                        <span># {item.index}</span>
+                        {'\u00a0'}
+                        <div className = "position-pair-label"><a target="_blank" href={getEtherscanAddress("token/" + item.token0)}>{item.symbol0}</a> / <a target="_blank" href={getEtherscanAddress("token/" + item.token1)}>{item.symbol1}</a></div>
                         <div className = {this.getScoreClass(score)}>
                             <span className = "position-score-label">{this.getScoreLabel(score)}</span>
                         </div>
@@ -185,34 +126,71 @@ var PositionStatusSynopsis = React.createClass({
                 </div>
                 <div className = "position-synopsis-head">
                     <div className = "position-synopsis-head-left">
-                        Saved amounts: {this.formatValue(parseFloat(fromDecimals(item.savedToken0Amount, item.decimals0, true)))} {item.symbol0} / {this.formatValue(parseFloat(fromDecimals(item.savedToken1Amount, item.decimals1, true)))} {item.symbol1}
+                        Fees: {this.formatAmount(item.feeAmount0, item.decimals0, item.symbol0, 6)} / {this.formatAmount(item.feeAmount1, item.decimals1, item.symbol1, 6)}
                         <br/>
                         <br/>
-                        Current amounts: {this.formatValue(parseFloat(fromDecimals(item.token0Amount, item.decimals0, true)))} {item.symbol0} / {this.formatValue(parseFloat(fromDecimals(item.token1Amount, item.decimals1, true)))} {item.symbol1}
+                        Available: {this.formatAmount(item.poolAmount0, item.decimals0, item.symbol0)} / {this.formatAmount(item.poolAmount1, item.decimals1, item.symbol1)}
+                        <br/>
+                        <br/>
+                        Total: {this.formatAmount(item.token0Amount, item.decimals0, item.symbol0)} / {this.formatAmount(item.token1Amount, item.decimals1, item.symbol1)}
+                        <br/>
+                        <br/>
+                        Original: {this.formatAmount(item.savedToken0Amount, item.decimals0, item.symbol0)} / {this.formatAmount(item.savedToken1Amount, item.decimals1, item.symbol1)}
+                        <br/>
+                        <br/>
+                        {Math.abs(score) === 2 ? <>
+                            Rebalanced: {this.formatAmount(item.after0, item.decimals0, item.symbol0)} / {this.formatAmount(item.after1, item.decimals1, item.symbol1)}
+                            <br/>
+                            <br/>
+                        </> : null}
+                        Difference: {this.formatAmount(item.difference0, item.decimals0, item.symbol0)} / {this.formatAmount(item.difference1, item.decimals1, item.symbol1)}
+                        <br/>
+                        <br/>
+                        {Math.abs(score) !== 2 ? <>
+                            Adjusted: {this.formatAmount(item.after0, item.decimals0, item.symbol0)} / {this.formatAmount(item.after1, item.decimals1, item.symbol1)}
+                            <br/>
+                            <br/>
+                        </> : null}
+                        Surplus: {this.formatAmount(item.surplus0, item.decimals0, item.symbol0)} / {this.formatAmount(item.surplus1, item.decimals1, item.symbol1)}
                     </div>
                 </div>
                 <div className = "position-chart-wrap">
                     <div className = "position-chart-grid"></div>
                     <div className = "position-chart-line"></div>
                     {stops.map(function(stop) {
-                        return this.renderStop(stop);
+                        return this.renderStop(stop, item);
                     }.bind(this))}
                     {this.renderCurrentPrice(item)}
                 </div>
             </div>
         );
     },
-    render: function() {
+    renderFeesToClaim() {
+        var amount = this.props.items && this.props.items.reduce((acc, it) => web3.utils.toBN(acc).add(web3.utils.toBN(it.surplus0)).add(web3.utils.toBN(it.surplus1)).toString(), "0") || '0';
+        return amount === '0' ? null : <div>
+            Fees to claim: {formatMoney(fromDecimals(numberToString(parseFloat(amount) * 0.9).split('.')[0], this.props.token.decimals, true), 6)} {this.props.token.symbol}
+        </div>
+    },
+    render() {
         return (
             <div className = "glass-card card-pad">
-                <div className = "card-title">Position status</div>
+                <div className = "card-title">
+                    Position status
+                    {this.props.items && this.props.items.length > 0 ? <label style = {{ float: "right", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                        <input type="checkbox" checked={this.props.synopticConverted} onChange={this.props.toggleSynopticConverted}/>
+                        <span>Convert amounts in {this.props.token.symbol}</span>
+                    </label> : null}
+                </div>
                 <div className = "card-copy">{!this.props.items ? "Loading status of the positions..." : this.props.items.length === 0 ? "No positions to show" : "Let the bot automatically rebalance them or do it by yourself"}</div>
                 {this.props.items && this.props.items.length > 0 ? <>
                     <div className = "section-divider"></div>
-                    {this.props.isOwner ? <button className = "button-base button-primary" disabled={!this.props.rebalance} onClick={this.props.onRebalance}>
-                        <i className = "fa-solid fa-scale-unbalanced"></i>
-                        Rebalance
-                    </button> : null}
+                    {this.props.isOwner ? <>
+                        {this.props.rebalance && this.props.synopticConverted ? this.renderFeesToClaim() : null}
+                        <button className = "button-base button-primary" disabled={!this.props.rebalance} onClick={this.props.onRebalance}>
+                            <i className = "fa-solid fa-scale-unbalanced"></i>
+                            Rebalance
+                        </button>
+                    </> : null}
                     <div className="position-synopsis-list" style={{"margin-top" : "5%"}}>
                         {this.props.items.map(this.renderCard)}
                     </div>
