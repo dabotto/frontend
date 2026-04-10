@@ -1,9 +1,15 @@
 var RemoveLiquidityCard = React.createClass({
+    renderSliderTicks(ref) {
+        ref && ref.childNodes.forEach(a => {
+            a.href = "javascript:void(0)";
+            a.onclick = () => this.props.onRemoveLiquidity(this.props.token.address, a.innerText.split('%').join('').trim(), true);
+        });
+    },
     render: function() {
         var token = this.props.token;
         var percent = this.props.percent;
         var amountToBeRemoved = this.props.amountToBeRemoved;
-        amountToBeRemoved = parseInt(percent) <= 0 || amountToBeRemoved === '0' ? "--" : !amountToBeRemoved ? "Loading..."  : (fromDecimals(amountToBeRemoved, token.decimals, true) + " " + token.symbol);
+        amountToBeRemoved = parseFloat(percent) <= 0 || amountToBeRemoved === '0' ? "--" : !amountToBeRemoved ? "Loading..."  : (fromDecimals(amountToBeRemoved, token.decimals, true) + " " + token.symbol);
         return (
             <div style = {{ marginTop: "12px" }}>
                 <div className = "card-header">
@@ -27,17 +33,17 @@ var RemoveLiquidityCard = React.createClass({
                                     type = "range"
                                     min = "0"
                                     max = "100"
-                                    step = "1"
+                                    step = "0.01"
                                     value = {percent}
                                     style = {{ "--slider-fill": percent + "%" }}
-                                    onChange = {e => this.props.onRemoveLiquidity(this.props.token.address, parseFloat(e.target.value, 10) || 0, true)}
+                                    onChange = {e => this.props.onRemoveLiquidity(this.props.token.address, e.target.value, true)}
                                 />
-                                <div className = "slider-ticks">
-                                    <span>0%</span>
-                                    <span>25%</span>
-                                    <span>50%</span>
-                                    <span>75%</span>
-                                    <span>100%</span>
+                                <div className = "slider-ticks" ref={this.renderSliderTicks}>
+                                    <a>0%</a>
+                                    <a>25%</a>
+                                    <a>50%</a>
+                                    <a>75%</a>
+                                    <a>100%</a>
                                 </div>
                             </div>
                         </div>
@@ -45,7 +51,7 @@ var RemoveLiquidityCard = React.createClass({
                             <div className = "field-label">You will receive</div>
                             <div className = "kpi-value" style = {{ marginTop: "8px" }}>{amountToBeRemoved}</div>
                         </div>
-                        <button className = "button-base button-primary" onClick={() => this.props.onRemoveLiquidity(token.address, percent)} disabled = {!token || percent <= 0 || !this.props.amountToBeRemoved}>
+                        <button className = "button-base button-primary" onClick={() => this.props.onRemoveLiquidity(token.address, percent)} disabled = {!token || parseFloat(percent) <= 0 || !this.props.amountToBeRemoved}>
                             <i className = "fa-solid fa-minus"></i>
                             Remove Liquidity
                         </button>

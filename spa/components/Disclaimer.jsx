@@ -4,9 +4,19 @@ var Disclaimer = React.createClass({
             more : false
         }
     },
+    renderTitle(title, className) {
+        return (
+            <div className="info-page-heading">
+                {sessionStorage.disclaimerAccepted === "true" ? <button type="button" className="button-base button-secondary button-back" aria-label="Back" title="Back" onClick={this.props.onDismiss}>
+                    <i className="fa-solid fa-arrow-left" aria-hidden="true"></i>
+                </button> : null}
+                <h2 className={className}>{title}</h2>
+            </div>
+        );
+    },
     renderMore() {
         return(<>
-            <h2>Comprehensive Experimental Software Disclaimer &amp; Limitation of Liability</h2>
+            {this.renderTitle("Comprehensive Experimental Software Disclaimer & Limitation of Liability")}
             <p><strong>Last updated:</strong> March, 18th, 2026</p>
 
             <p>
@@ -160,7 +170,7 @@ var Disclaimer = React.createClass({
     },
     renderLess() {
         return (<>
-            <h2 className = "card-title">Experimental Risk Notice</h2>
+            {this.renderTitle("Experimental Risk Notice", "card-title")}
             <p>
                 This application is <strong>highly experimental</strong> and provided for research and testing purposes only.
                 Blockchain interactions are <strong>irreversible</strong> and may result in <strong>partial or total loss of funds</strong>
@@ -177,17 +187,22 @@ var Disclaimer = React.createClass({
         return (
             <div className = "glass-card card-pad">
                 <div className = "card-header">
-                    <div>
+                    <div className="info-page-content">
                         {this["render" + (this.state.more ? "More" : "Less")]()}
                         <p>
                             <a href="javascript:;" onClick={() => this.setState({more : !this.state.more})}>{this.state.more ? "Show less" : "Read more"}</a>
                         </p>
                     </div>
                 </div>
+                <br/>
+                <button className = "button-base button-primary" onClick={this.props.onHowItWorks}>
+                    <i className = "fa-solid fa-cog"></i>
+                    How it works
+                </button>
                 <div className = "section-divider"></div>
                 <button className = "button-base button-primary" onClick={this.props.onDismiss}>
                     <i className = "fa-solid fa-check"></i>
-                    I've read and accept the conditions
+                    {sessionStorage.disclaimerAccepted !== "true" ? "I've read and accept the conditions" : "Got it"}
                 </button>
             </div>
         );

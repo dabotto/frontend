@@ -1,11 +1,14 @@
 var AddLiquidityCard = React.createClass({
     getInitialState: function() {
         return {
-            amount: "0"
+            amount: "0",
+            subject: "",
+            showSubject: false
         };
     },
     setMax: function() {
-        this.props.token && this.setState({ amount: parseFloat(fromDecimals(this.props.balance, this.props.token.decimals, true))});
+        var self = this;
+        this.props.token && this.setState({ amount: parseFloat(fromDecimals(this.props.balance, this.props.token.decimals, true))}, self.props.refreshBalance);
     },
     handleAmountChange: function(e) {
         var value = e.target.value;
@@ -19,11 +22,15 @@ var AddLiquidityCard = React.createClass({
         var allowance = (token && this.props.allowance) || '0';
         var isEth = token && token.symbol === "ETH";
         var approved = token && (isEth || this.props.approvedTokens[token.address]);
-        approved = parseInt(allowance) >= parseInt(this.state.amount || 0);
+        approved = !token ? false : parseInt(allowance) >= parseInt(toDecimals(this.state.amount || 0, token.decimals, true));
         var approveDisabled = !token || isEth || approved;
         var amountValue = parseFloat(this.state.amount || "0");
         var addDisabled = !token || !this.state.amount || isNaN(amountValue) || amountValue <= 0 || (!isEth && !approved);
         var approvePrimary = token && !isEth && !approved;
+        var subject = this.state.showSubject ? this.state.subject.trim() : '';
+        var invalidSubject = subject && !web3utils.isAddress(subject);
+        var forAnother = subject && !invalidSubject && subject.toLowerCase() !== voidEthereumAddress && subject.toLowerCase() !== this.props.walletAddress.toLowerCase();
+        addDisabled = addDisabled || !!invalidSubject;
         return (
             <div style = {{ marginTop: "12px" }}>
                 <div className = "card-header">
@@ -33,7 +40,19 @@ var AddLiquidityCard = React.createClass({
                     </div>
                 </div>
                 <div className = "form-stack">
-                    <button className = "select-token-button" onClick = {function() { this.props.onOpenPicker("addLiquidity"); }.bind(this)}>
+                    <div className="field-shell">
+                        <label className="manager-subject-toggle">
+                            <input type="checkbox" checked={this.state.showSubject} onChange={e => this.setState({showSubject: e.target.checked, subject: ''})} aria-controls="liquidity-subject-fields" aria-expanded={this.state.showSubject} />
+                            <span>Deposit for another wallet</span>
+                        </label>
+                        {this.state.showSubject ? <div id="liquidity-subject-fields">
+                            <label className="field-label" htmlFor="liquidity-subject">Beneficiary (optional)</label>
+                            <input id="liquidity-subject" className="manager-address-input" type="text" placeholder="Empty = your wallet" value={this.state.subject} onChange={e => this.setState({subject: e.target.value})} aria-invalid={!!invalidSubject} />
+                            <div className="muted-2">{invalidSubject ? "Enter a valid Ethereum address." : "An empty or zero address uses your wallet. Deposits for another wallet require owner or referral authorization. Tokens are paid from your wallet."}</div>
+                        </div> : null}
+                        <div className="muted-2">{this.props.isOwner ? "No entry fee for owner deposits." : forAnother ? "Supply fee: 3% to the owner and 3% to you as the referral. The beneficiary receives the remaining 94%." : "Supply fee: 6% to the owner."}</div>
+                    </div>
+                    <button className = "select-token-button" onClick = {() => this.props.onOpenPicker("addLiquidity")}>
                         {token ? (
                             <>
                                 <div className = "select-left">
@@ -91,11 +110,11 @@ var AddLiquidityCard = React.createClass({
                     </div>
                     {this.props.toast ? <div className = "status-pill success"><i className = "fa-solid fa-circle-check"></i>{this.props.toast}</div> : null}
                     <div className = "cta-row">
-                        <button className = {"button-base " + (approvePrimary ? "button-primary" : "button-secondary")} disabled = {approveDisabled} onClick = {function() { this.props.onApprove(token.address, this.state.amount); }.bind(this)}>
+                        <button className = {"button-base " + (approvePrimary ? "button-primary" : "button-secondary")} disabled = {approveDisabled} onClick = {function() { this.props.onApprove(token.address, toDecimals(this.state.amount || '0', token.decimals)); }.bind(this)}>
                             <i className = "fa-solid fa-badge-check"></i>
                             Approve
                         </button>
-                        <button onClick={() => this.props.onAddLiquidity(token.address, toDecimals(this.state.amount || '0', token.decimals))} className = {"button-base " + (!approvePrimary ? "button-primary" : "button-secondary")} disabled = {addDisabled}>
+                        <button onClick={() => this.props.onAddLiquidity(token.address, toDecimals(this.state.amount || '0', token.decimals), subject)} className = {"button-base " + (!approvePrimary ? "button-primary" : "button-secondary")} disabled = {addDisabled}>
                             <i className = "fa-solid fa-plus"></i>
                             Add Liquidity
                         </button>

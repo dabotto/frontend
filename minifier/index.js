@@ -8,6 +8,7 @@ var script = '';
 var scripts = '(window.preloadedScripts=window.preloadedScripts||[]).push(...[';
 
 const fs = require('fs');
+var regeneratorRuntime = fs.readFileSync(resolve(__dirname, 'lib/regenerator-runtime.min.js'), 'UTF-8') + ';\n';
 
 const babel = require('../assets/plugins/react/babel.min');
 const uglify = require('./lib/uglify-js');
@@ -65,7 +66,7 @@ async function run() {
         }
         await buldJsxs(baseFolder, sourceFolder);
         scripts = scripts.substring(0, scripts.length - 1) + ']);';
-        fs.writeFileSync(scriptPath, useStrict + safeTypeof + asyncToGenerator + scripts + script);
+        fs.writeFileSync(scriptPath, useStrict + safeTypeof + asyncToGenerator + regeneratorRuntime + scripts + script);
         fs.writeFileSync(stylePath, style);
     } catch (e) {
         if((e.message || e).toString().indexOf('no such file or directory') === -1) {
