@@ -9,6 +9,17 @@ window.base64Regex = new RegExp("data:([\\S]+)\\/([\\S]+);base64", "gs");
 window.web3util = new Web3Browser();
 window.web3 = new Web3Browser();
 window.abi = new window.ethers.utils.AbiCoder();
+window.web3utils = window.web3util.utils;
+window.web3utils.toBN = window.web3utils.toBN || function(n) {
+    return {
+        value : n,
+        add : a => window.web3utils.toBN(BigInt(n) + BigInt(a.value)),
+        sub : a => window.web3utils.toBN(BigInt(n) - BigInt(a.value)),
+        mul : a => window.web3utils.toBN(BigInt(n) * BigInt(a.value)),
+        div : a => window.web3utils.toBN(BigInt(n) / BigInt(a.value)),
+        toString : () => numberToString(n)
+    }
+}
 
 if ('WebSocket' in window) {
     var OldWebSocket = WebSocket;
@@ -359,6 +370,7 @@ window.newContract = function newContract(abi, address) {
 
 window.fromDecimals = function fromDecimalsRaw(n, d, noFormat) {
     n = (n && n.value || n);
+    n = numberToString(n);
     d = (d && d.value || d);
     if (!n || !d) {
         return "0";
@@ -366,7 +378,7 @@ window.fromDecimals = function fromDecimalsRaw(n, d, noFormat) {
     var decimals = (typeof d).toLowerCase() === 'string' ? parseInt(d) : d;
     var symbol = toEthereumSymbol(decimals);
     if (symbol) {
-        var result = web3.utils.fromWei(((typeof n).toLowerCase() === 'string' ? n : numberToString(n)).split('.')[0], symbol);
+        var result = window.web3.utils.fromWei(((typeof n).toLowerCase() === 'string' ? n : numberToString(n)).split('.')[0], symbol);
         return noFormat === true ? result : formatMoney(result);
     }
     var number = (typeof n).toLowerCase() === 'string' ? parseInt(n) : n;
@@ -388,7 +400,7 @@ window.toDecimals = function toDecimalsRaw(n, d) {
     var symbol = toEthereumSymbol(decimals);
     while(symbol) {
         try {
-            return web3.utils.toWei(n = ((typeof n).toLowerCase() === 'string' ? n : numberToString(n)), symbol);
+            return window.web3.utils.toWei(n = ((typeof n).toLowerCase() === 'string' ? n : numberToString(n)), symbol);
         } catch(e) {
             var message = (e.message || e).toString().toLowerCase();
             if(message.indexOf('too many decimal places') === -1) {
@@ -412,6 +424,9 @@ window.numberToString = function numberToString(num, locale) {
     }
     if ((typeof num).toLowerCase() === 'string') {
         return num.split(',').join('');
+    }
+    if ((typeof num).toLowerCase() === 'bigint') {
+        return num.toString();
     }
     let numStr = String(num);
 
@@ -440,7 +455,7 @@ window.numberToString = function numberToString(num, locale) {
 }
 
 window.normalizeValue = function normalizeValue(amount, decimals) {
-    return web3.utils.toBN(amount).mul(web3.utils.toBN(10 ** (18 - decimals))).toString();
+    return window.web3.utils.toBN(amount).mul(window.web3.utils.toBN(10 ** (18 - decimals))).toString();
 }
 
 window.formatMoneyDecPlaces = 0;
@@ -560,7 +575,7 @@ window.permit = async function permit(tokenAddress, spender, value, deadline) {
     var domain = {
         name: domainSeparatorName,
         version: domainSeparatorVersion,
-        chainId: await web3.eth.getChainId(),
+        chainId: await window.web3.eth.getChainId(),
         verifyingContract: token.options.address
     };
 
@@ -591,7 +606,7 @@ window.permit = async function permit(tokenAddress, spender, value, deadline) {
     };
 
     return await new Promise(async function(ok, ko) {
-        await web3.currentProvider.sendAsync({
+        await window.web3.currentProvider.sendAsync({
             method: 'eth_signTypedData_v4',
             params: [owner, JSON.stringify(data)],
             from: owner
@@ -603,7 +618,7 @@ window.permit = async function permit(tokenAddress, spender, value, deadline) {
             return ok({
                 r: '0x' + signature.slice(0, 64),
                 s: '0x' + signature.slice(64, 128),
-                v: web3.utils.toDecimal('0x' + signature.slice(128, 130)),
+                v: window.web3.utils.toDecimal('0x' + signature.slice(128, 130)),
                 ...message
             });
         });
@@ -652,8 +667,8 @@ function writeJsonStorage(key, value) {
 function getStoredTokenMeta() {
     var tokenMetaCache = readJsonStorage("tokenMetaCache", {});
     Object.entries(tokenMetaCache).forEach(it => {
-        it[1].address = web3.utils.toChecksumAddress(it[0]);
-        it[1].isCustom = window.DEFAULT_TOKEN_ADDRESSES.map(val => web3.utils.toChecksumAddress(val)).indexOf(web3.utils.toChecksumAddress(it[0])) === -1
+        it[1].address = window.web3.utils.toChecksumAddress(it[0]);
+        it[1].isCustom = window.DEFAULT_TOKEN_ADDRESSES.map(val => window.web3.utils.toChecksumAddress(val)).indexOf(window.web3.utils.toChecksumAddress(it[0])) === -1
     });
     return tokenMetaCache;
 }
@@ -674,14 +689,14 @@ function fetchTokenMeta(address) {
              return;
          }
          var registry = getTokenMetaByAddress(key) || window.DEFAULT_TOKEN_REGISTRY[key] || {
-             name : abi.decode(["string"], await web3Call(web3, key, "name"))[0],
-             symbol : abi.decode(["string"], await web3Call(web3, key, "symbol"))[0],
-             decimals : abi.decode(["uint256"], await web3Call(web3, key, "decimals"))[0].toString(),
+             name : abi.decode(["string"], await web3Call(window.web3, key, "name"))[0],
+             symbol : abi.decode(["string"], await web3Call(window.web3, key, "symbol"))[0],
+             decimals : abi.decode(["uint256"], await web3Call(window.web3, key, "decimals"))[0].toString(),
          };
          return resolve({
             ...registry,
             address : key,
-            isCustom : window.DEFAULT_TOKEN_ADDRESSES.map(it => web3.utils.toChecksumAddress(it)).indexOf(web3.utils.toChecksumAddress(key)) === -1
+            isCustom : window.DEFAULT_TOKEN_ADDRESSES.map(it => window.web3.utils.toChecksumAddress(it)).indexOf(window.web3.utils.toChecksumAddress(key)) === -1
          });
     });
 }
