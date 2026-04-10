@@ -3,7 +3,7 @@ var WalletCard = React.createClass({
         var self = this;
         var options = {
             networks: [window.appKit.networks.base],
-            projectId: "241b9f6e74b7ca5cb7eadeaa6081b54d",
+            projectId: "1f64e5892f6e4e11a9b7444ddfa0d0ae",
             defaultNetwork: window.appKit.networks.base
         };
         (window.walletModal = window.appKit.createAppKit({
@@ -20,8 +20,14 @@ var WalletCard = React.createClass({
         }
         var address = modal.getAddress();
         if(this.props.walletAddress !== address) {
+            var walletProvider = modal.getWalletProvider();
             if(address) {
-                (window.web3 = window.web3 || new Web3Browser()).setProvider(modal.getWalletProvider());
+                if(window.braveEthereum) {
+                    delete window.web3;
+                    window.web3 = new Web3Browser(walletProvider);
+                } else {
+                    (window.web3 = window.web3 || new Web3Browser(walletProvider)).setProvider(walletProvider);
+                }
             }
             this.props.onWallet(address);
         }

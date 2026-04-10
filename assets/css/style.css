@@ -345,11 +345,27 @@ input {
 }
 
 .big-value {
+    display: inline-block;
     margin-top: 8px;
     font-size: 34px;
     font-weight: 800;
     line-height: 1;
     letter-spacing: -0.04em;
+}
+
+.claim-reward-button-container {
+    float: right;
+}
+
+@media (max-width: 699px) {
+    .big-value {
+        font-size: 25px;
+    }
+
+    .claim-reward-button-container {
+        float: none;
+        margin-top: 5%;
+    }
 }
 
 .big-subline {
@@ -796,6 +812,9 @@ input[type="range"]::-moz-range-thumb {
     font-variant-numeric: tabular-nums;
     border: 1px solid transparent;
     line-height: 1;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.022);
+    border-color: rgba(151, 174, 214, 0.12);
 }
 
 .position-score-label {
@@ -1021,7 +1040,6 @@ input[type="range"]::-moz-range-thumb {
     .position-stop-value {
         font-size: 8px;
     }
-
 }
 
 .position-kpi-block {
@@ -1056,6 +1074,24 @@ input[type="range"]::-moz-range-thumb {
     line-height: 1.3;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+}
+
+.position-kpi-label.position-kpi-config {
+    width: 100%;
+    padding-left: 1%;
+    padding-right: 1%;
+}
+
+.position-kpi-label.position-kpi-config .position-kpi-config-element {
+    display: inline-block;
+}
+
+.position-kpi-label.position-kpi-config .position-kpi-config-element:first-of-type {
+    float: left !important;
+}
+
+.position-kpi-label.position-kpi-config .position-kpi-config-element:last-of-type {
+    float: right;
 }
 
 .position-kpi-value {

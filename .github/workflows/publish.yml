@@ -4,6 +4,8 @@ on:
     push:
         branches:
             - main
+            - master
+    workflow_dispatch:
 
 permissions:
     contents: write
@@ -25,7 +27,7 @@ jobs:
                       exit 1
                   fi
 
-            - name: Checkout main
+            - name: Checkout repository
               uses: actions/checkout@v4
               with:
                   fetch-depth: 0
@@ -47,11 +49,12 @@ jobs:
                       git push origin gh-pages
                   fi
 
-            - name: Switch to gh-pages and reset to main
+            - name: Switch to gh-pages and reset to current branch
               run: |
-                  git fetch origin main gh-pages
+                  BRANCH="${GITHUB_REF_NAME}"
+                  git fetch origin "$BRANCH" gh-pages
                   git checkout -B gh-pages origin/gh-pages
-                  git reset --hard origin/main
+                  git reset --hard "origin/$BRANCH"
 
             - name: Uncomment for minifier in index.html
               run: |
