@@ -184,10 +184,15 @@ var Disclaimer = React.createClass({
                         </p>
                     </div>
                 </div>
+                <br/>
+                <button className = "button-base button-primary" onClick={this.props.onHowItWorks}>
+                    <i className = "fa-solid fa-cog"></i>
+                    How it works
+                </button>
                 <div className = "section-divider"></div>
                 <button className = "button-base button-primary" onClick={this.props.onDismiss}>
                     <i className = "fa-solid fa-check"></i>
-                    I've read and accept the conditions
+                    {sessionStorage.disclaimerAccepted !== "true" ? "I've read and accept the conditions" : "Got it"}
                 </button>
             </div>
         );

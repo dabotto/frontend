@@ -5,7 +5,8 @@ var AddLiquidityCard = React.createClass({
         };
     },
     setMax: function() {
-        this.props.token && this.setState({ amount: parseFloat(fromDecimals(this.props.balance, this.props.token.decimals, true))});
+        var self = this;
+        this.props.token && this.setState({ amount: parseFloat(fromDecimals(this.props.balance, this.props.token.decimals, true))}, self.props.refreshBalance);
     },
     handleAmountChange: function(e) {
         var value = e.target.value;
@@ -33,7 +34,7 @@ var AddLiquidityCard = React.createClass({
                     </div>
                 </div>
                 <div className = "form-stack">
-                    <button className = "select-token-button" onClick = {function() { this.props.onOpenPicker("addLiquidity"); }.bind(this)}>
+                    <button className = "select-token-button" onClick = {() => this.props.onOpenPicker("addLiquidity")}>
                         {token ? (
                             <>
                                 <div className = "select-left">
@@ -91,7 +92,7 @@ var AddLiquidityCard = React.createClass({
                     </div>
                     {this.props.toast ? <div className = "status-pill success"><i className = "fa-solid fa-circle-check"></i>{this.props.toast}</div> : null}
                     <div className = "cta-row">
-                        <button className = {"button-base " + (approvePrimary ? "button-primary" : "button-secondary")} disabled = {approveDisabled} onClick = {function() { this.props.onApprove(token.address, this.state.amount); }.bind(this)}>
+                        <button className = {"button-base " + (approvePrimary ? "button-primary" : "button-secondary")} disabled = {approveDisabled} onClick = {function() { this.props.onApprove(token.address, toDecimals(this.state.amount || '0', token.decimals)); }.bind(this)}>
                             <i className = "fa-solid fa-badge-check"></i>
                             Approve
                         </button>
