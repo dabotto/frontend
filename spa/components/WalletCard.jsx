@@ -3,7 +3,7 @@ var WalletCard = React.createClass({
         var self = this;
         var options = {
             networks: [window.appKit.networks.base],
-            projectId: "241b9f6e74b7ca5cb7eadeaa6081b54d",
+            projectId: "1f64e5892f6e4e11a9b7444ddfa0d0ae",
             defaultNetwork: window.appKit.networks.base
         };
         (window.walletModal = window.appKit.createAppKit({

@@ -1,4 +1,29 @@
 var ClaimRewardCard = React.createClass({
+    formatDate(date, varOrder) {
+        varOrder = Array.isArray(varOrder = varOrder || ["day", "hour", "minute"]) ? varOrder : [varOrder];
+        var varName;
+        var varValue = 0;
+        for(var n of varOrder) {
+            var v = date[n + "s"];
+            if(v != 0) {
+                varName = n;
+                varValue = v;
+                break;
+            }
+        }
+        if(varValue === 0) {
+            return "";
+        }
+
+        return varValue + " " + varName + (varValue === 1 ? "" : "s");
+    },
+    formatStartDate(startDate) {
+        var message = this.formatDate(startDate);
+        return message ? (message + " ago") : "";
+    },
+    formatEoyDate(eoyDate) {
+        return this.formatDate(eoyDate, "day") || "NOW";
+    },
     render: function() {
         var token = this.props.token;
         var claimableValue = this.props.claimableValue;
@@ -14,9 +39,7 @@ var ClaimRewardCard = React.createClass({
                 </div>
                 <button
                     className = "select-token-button"
-                    onClick = {function() {
-                        this.props.onOpenPicker("claimReward");
-                    }.bind(this)}
+                    onClick = {() => this.props.onOpenPicker("claimReward")}
                 >
                     {token ? (
                         <>
@@ -45,84 +68,77 @@ var ClaimRewardCard = React.createClass({
                     <div className = "section-divider"></div>
 
                     <div className = "position-kpi-block">
-
                         <div className = "position-kpi-item">
                             <div className = "position-kpi-label">
-                                Next season: {this.props.summary.nextSeasonDate}
+                                Monitoring started: {this.props.summary.monitorStart.targetDateFormatted}
                             </div>
                             <div className = "position-kpi-value">
-                                {this.props.summary.nextSeasonTimeout}
+                                {this.formatStartDate(this.props.summary.monitorStart)}
                             </div>
-                        </div>
-
-                    </div>
-
-                    <div className = "position-collecting-box">
-
-                        <div className = "position-collecting-layout">
-                            <div className = "position-collecting-now">
-                                <div className = "position-collecting-now-label">Fees you're generating this season</div>
-                                <div className = "position-collecting-now-value">{this.props.summary.collectNow} {token?.symbol}</div>
-                            </div>
-                        </div>
-                        <div className = "position-collecting-head">
+                            <br/>
                             <div className = "position-kpi-label">
-                                Projected fee run rate through year-end:
+                                (It will be set at the beginning of every year)
                             </div>
-                        </div>
-
-                        <div className = "position-collecting-layout">
-
-                            <div className = "position-collecting-grid">
-                                <div className = "position-collecting-item">
-                                    <div className = "position-collecting-item-label">Daily</div>
-                                    <div className = "position-collecting-item-value">{this.props.summary.collectDay} {token?.symbol}</div>
-                                </div>
-
-                                <div className = "position-collecting-item">
-                                    <div className = "position-collecting-item-label">Weekly</div>
-                                    <div className = "position-collecting-item-value">{this.props.summary.collectWeek} {token?.symbol}</div>
-                                </div>
-
-                                <div className = "position-collecting-item">
-                                    <div className = "position-collecting-item-label">Monthly</div>
-                                    <div className = "position-collecting-item-value">{this.props.summary.collectMonth} {token?.symbol}</div>
-                                </div>
-
-                                <div className = "position-collecting-item">
-                                    <div className = "position-collecting-item-label">End of Year</div>
-                                    <div className = "position-collecting-item-value">{this.props.summary.collectYear} {token?.symbol}</div>
-                                </div>
-                            </div>
-
                         </div>
                     </div>
 
-                    <div className = "section-divider"></div>
+                    <br/>
 
                     <div className = "position-kpi-grid">
 
-                        <div className = "position-kpi-card">
+                        <div className = {
+                            "position-kpi-card " +
+                            (this.props.summary?.stillInvested === '0' ? "position-pnl-positive" : "position-pnl-negative")
+                        }>
                             <div className = "position-kpi-label">
-                                Your participation
+                                Still invested
                             </div>
                             <div className = "position-kpi-value">
-                                {this.props.summary.participationPercent}%
+                                {this.props.summary.stillInvested} {token?.symbol}
                             </div>
                         </div>
 
                         <div className = "position-kpi-card">
                             <div className = "position-kpi-label">
-                                Your heritage
+                                Actual heritage
                             </div>
                             <div className = "position-kpi-value">
                                 {this.props.summary.heritageValue} {token?.symbol}
                             </div>
                         </div>
 
+                        <div className = "position-kpi-card">
+                            <div className = "position-kpi-label">
+                                Fees accruing
+                            </div>
+                            <div className = "position-kpi-value">
+                                {this.props.summary.toBeCollected} {token?.symbol}
+                            </div>
+                        </div>
+                    </div>
+                </>}
+                {!claimableValue || claimableValue === '0' ? null : <>
+                    <div className = "metric-card">
+                        <div className = "metric-label">
+                            Claimable Fees
+                        </div>
+                        <div className = "big-value">
+                            {claimableValue ? fromDecimals(claimableValue, token.decimals, true) + " " + token.symbol : "--"}
+                        </div>
+                        <div className = "claim-reward-button-container">
+                            <button className = "button-base button-primary" disabled={!token || !claimableValue} onClick={this.props.onClaimReward}>
+                                {token ? "Claim" : "Select a token first"}
+                            </button>
+                        </div>
+                    </div>
+                </>}
+                {!this.props.summary ? null : <>
+                    <br/>
+                    <div className = "position-kpi-grid">
+
                         <div className = {
                             "position-kpi-card " +
-                            (this.props.summary.pnl?.indexOf('-') === -1 ? "position-pnl-positive" : "position-pnl-negative")
+                            (this.props.summary.pnl === '0' ? "" : this.props.summary.pnl?.indexOf('-') === -1 ? "position-pnl-positive" : "position-pnl-negative")
                         }>
                             <div className = "position-kpi-label">
                                 Profit and loss
@@ -132,21 +148,70 @@ var ClaimRewardCard = React.createClass({
                             </div>
                         </div>
 
+                        <div className = "position-kpi-card">
+                            <div className = "position-kpi-label">
+                                {this.props.summary.accruingResetDate ? 'Accruing reset date: ' + this.props.summary.monitorEnd : 'Last monitor update:'}
+                            </div>
+                            <div className = "position-kpi-value">
+                                {this.props.summary.accruingResetDate || this.props.summary.monitorEnd}
+                            </div>
+                        </div>
+
+                        <div className = "position-kpi-card">
+                            <div className = "position-kpi-label">
+                                Claimed fees
+                            </div>
+                            <div className = "position-kpi-value">
+                                {this.props.summary.alreadyCollected} {token?.symbol}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className = "position-collecting-box">                            
+                        <div className = "position-kpi-label">
+                            Run rate forecast:
+                        </div>
+                        <div className = "position-collecting-head">
+                            <div className = "position-kpi-label position-kpi-config">
+                                <div className="position-kpi-config-element">
+                                    <label>
+                                        <input type="checkbox" checked={this.props.forecastIn12Months} onChange={this.props.toggleForecastIn12Months} />
+                                        {"\u00a0"}
+                                        <span>In 12 months</span>
+                                    </label>
+                                </div>
+                                {!this.props.isOwner ? null : <div className="position-kpi-config-element">
+                                    <label>
+                                        <input type="checkbox" checked={this.props.net} onChange={this.props.toggleNet} />
+                                        {"\u00a0"}
+                                        <span>net</span>
+                                    </label>
+                                </div>}
+                            </div>
+                        </div>
+
+                        <div className = "position-collecting-layout">
+                            <div className = "position-collecting-grid">
+                                <div className = "position-collecting-item">
+                                    <div className = "position-collecting-item-label">Daily</div>
+                                    <div className = "position-collecting-item-value">{this.props.summary.collectDay} {token?.symbol}</div>
+                                </div>
+                                <div className = "position-collecting-item">
+                                    <div className = "position-collecting-item-label">Weekly</div>
+                                    <div className = "position-collecting-item-value">{this.props.summary.collectWeek} {token?.symbol}</div>
+                                </div>
+                                <div className = "position-collecting-item">
+                                    <div className = "position-collecting-item-label">Monthly</div>
+                                    <div className = "position-collecting-item-value">{this.props.summary.collectMonth} {token?.symbol}</div>
+                                </div>
+                                <div className = "position-collecting-item">
+                                    <div className = "position-collecting-item-label">{this.props.forecastIn12Months ? "Yearly" : ("EOY (" + this.formatEoyDate(this.props.summary.eoy) + ")")}</div>
+                                    <div className = "position-collecting-item-value">{this.props.summary.collectYear} {token?.symbol}</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </>}
-                <div className = "metric-card">
-                    <div className = "metric-label">
-                        Claimable reward
-                    </div>
-                    <div className = "big-value">
-                        {claimableValue ? claimableValue + " " + token.symbol : "--"}
-                    </div>
-                </div>
-                <div className = "section-divider"></div>
-                <button className = "button-base button-primary" disabled={!token || !claimableValue} onClick={this.props.onClaimReward}>
-                    <i className = "fa-solid fa-hand-holding-dollar"></i>
-                    {token ? "Claim now" : "Select a token first"}
-                </button>
             </div>
         );
     }
